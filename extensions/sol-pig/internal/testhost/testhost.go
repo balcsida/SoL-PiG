@@ -38,6 +38,13 @@ type Options struct {
 	Models     map[string]map[string]any                   // "provider/id" → model map for getModel; absent → null
 	ModelReply func(request map[string]any) map[string]any // final assistant message of modelStream; nil → stopReason "error"
 	ModelDelay time.Duration                               // holds the modelStream reply; ends early when the host stops
+
+	Idle          *bool                                             // isIdle answer; nil → true
+	ContextUsage  map[string]any                                    // getContextUsage answer; nil → null
+	SystemPrompt  string                                            // getSystemPrompt answer
+	ModelInfo     map[string]any                                    // getModelInfo answer; nil → null
+	Projection    func(entries []map[string]any) []map[string]any   // buildSessionProjection entries; nil → message entries project their message, others none
+	CompactResult func(opts map[string]any) (map[string]any, error) // compact outcome; nil → {summary:"SUMMARY", firstKeptEntryId:"", tokensBefore:0}
 }
 
 // Call is one recorded extension→host call.
@@ -127,6 +134,7 @@ type Host struct {
 	handles    uint64
 	cancels    map[string]context.CancelFunc // in-flight builtinTool.execute by executeId
 	modelReqs  []map[string]any
+	idle       bool
 }
 
 // Start runs ext against a fake host and returns once the handshake is done.
@@ -143,6 +151,7 @@ func Start(t *testing.T, ext *sdk.Extension, opts Options) *Host {
 		t: t, opts: opts, conn: hostConn, done: make(chan error, 1), stop: make(chan struct{}),
 		registered: map[string][]int{}, handlers: map[string][]int{}, tools: map[string]ToolDecl{},
 		scripted: map[string]func(map[string]any) (any, error){}, pending: map[string]chan responseMsg{},
+		idle: opts.Idle == nil || *opts.Idle,
 	}
 	go func() { h.done <- ext.RunWithConn(extConn) }()
 
@@ -242,6 +251,28 @@ func (h *Host) Entries() []map[string]any {
 	return slices.Clone(h.entries)
 }
 
+// Aborts returns how many abort calls the extension made.
+func (h *Host) Aborts() int { return len(h.Calls("abort")) }
+
+// Messages returns the sendMessage calls, each with args customType, content, display and options.
+func (h *Host) Messages() []Call {
+	var out []Call
+	for _, c := range h.Calls("sendMessage") {
+		message, _ := c.Args["message"].(map[string]any)
+		out = append(out, Call{Method: c.Method, Args: map[string]any{
+			"customType": message["customType"], "content": message["content"], "display": message["display"], "options": c.Args["options"],
+		}})
+	}
+	return out
+}
+
+// SetIdle changes the isIdle answer.
+func (h *Host) SetIdle(v bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.idle = v
+}
+
 // Handle scripts the reply to a host method, replacing the default.
 func (h *Host) Handle(method string, fn func(args map[string]any) (any, error)) {
 	h.mu.Lock()
@@ -253,7 +284,12 @@ func (h *Host) Handle(method string, fn func(args map[string]any) (any, error)) 
 func (h *Host) Emit(event string, data map[string]any) (any, error) {
 	h.t.Helper()
 	var last any
+	// PiG's host applies each context handler's messages before the next handler runs (the SDK replies once per handler).
+	messages, replaced := data["messages"], false
 	for _, id := range h.Handlers(event) {
+		if event == "context" {
+			data = map[string]any{"messages": messages}
+		}
 		raw, err := h.invoke("event", "", event, id, "", data)
 		if err != nil {
 			return nil, err
@@ -266,6 +302,15 @@ func (h *Host) Emit(event string, data map[string]any) (any, error) {
 			h.t.Fatalf("decode %s result %s: %v", event, raw, err)
 		}
 		last = result
+		if reply, _ := result.(map[string]any); event == "context" {
+			if list, ok := reply["messages"].([]any); ok {
+				unchanged, _ := reply["_pigContextUnchanged"].(bool)
+				messages, replaced = list, replaced || !unchanged
+			}
+		}
+	}
+	if event == "context" && last != nil {
+		return map[string]any{"messages": messages, "_pigContextUnchanged": !replaced}, nil
 	}
 	return last, nil
 }
@@ -419,7 +464,7 @@ func (h *Host) handleCall(id string, call *callMsg) {
 		return
 	}
 	args := h.record(call.Method, call.Args)
-	if call.Method == "builtinTool.execute" || call.Method == "modelStream" {
+	if call.Method == "builtinTool.execute" || call.Method == "modelStream" || call.Method == "compact" {
 		// Runs aside so an executeTool.cancel can arrive, or a delayed model reply wait, without stalling the read loop.
 		go h.finishCall(id, call, args)
 		return
@@ -477,7 +522,21 @@ func (h *Host) reply(method string, raw json.RawMessage, args map[string]any) (a
 	case "isProjectTrusted":
 		return map[string]any{"trusted": h.opts.ProjectTrusted}, nil
 	case "isIdle":
-		return map[string]any{"idle": false}, nil
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return map[string]any{"idle": h.idle}, nil
+	case "getContextUsage":
+		return h.opts.ContextUsage, nil
+	case "getSystemPrompt":
+		return map[string]any{"prompt": h.opts.SystemPrompt}, nil
+	case "getModelInfo":
+		return h.opts.ModelInfo, nil
+	case "abort":
+		return empty, nil
+	case "sendMessage":
+		return empty, nil
+	case "compact":
+		return h.compact(args)
 	case "appendEntry":
 		h.mu.Lock()
 		h.entries = append(h.entries, map[string]any{"type": "custom", "customType": args["customType"], "data": args["data"]})
@@ -529,6 +588,8 @@ func (h *Host) reply(method string, raw json.RawMessage, args map[string]any) (a
 			return h.opts.SessionID, nil
 		case "getBranch":
 			return h.Entries(), nil
+		case "buildSessionProjection":
+			return map[string]any{"entries": h.project(h.Entries())}, nil
 		default:
 			h.t.Errorf("unhandled session manager call %s %v", m, args)
 			return nil, fmt.Errorf("unhandled session manager call %s", m)
@@ -612,4 +673,40 @@ func (h *Host) modelStream(args map[string]any) (any, error) {
 		"method": "model_stream_event", "args": map[string]any{"streamId": args["streamId"], "event": event},
 	}})
 	return map[string]any{}, nil
+}
+
+// compact answers like the host: session_compact reaches the extension before the call settles.
+func (h *Host) compact(args map[string]any) (any, error) {
+	result := map[string]any{"summary": "SUMMARY", "firstKeptEntryId": "", "tokensBefore": 0}
+	if h.opts.CompactResult != nil {
+		var err error
+		if result, err = h.opts.CompactResult(args); err != nil {
+			return nil, err
+		}
+	}
+	entry := map[string]any{"type": "compaction"}
+	for k, v := range result {
+		entry[k] = v
+	}
+	if _, err := h.Emit("session_compact", map[string]any{
+		"type": "session_compact", "compactionEntry": entry, "fromExtension": false, "reason": "manual", "willRetry": false,
+	}); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (h *Host) project(entries []map[string]any) []map[string]any {
+	if h.opts.Projection != nil {
+		return h.opts.Projection(entries)
+	}
+	out := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		messages := []map[string]any{}
+		if message, ok := entry["message"].(map[string]any); ok && entry["type"] == "message" {
+			messages = append(messages, message)
+		}
+		out = append(out, map[string]any{"sourceEntry": entry, "messages": messages})
+	}
+	return out
 }

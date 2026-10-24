@@ -298,3 +298,134 @@ func TestModelReplyDelay(t *testing.T) {
 		t.Fatalf("Complete returned after %v, want >= 300ms", took)
 	}
 }
+
+func TestCompactionChoreographyCalls(t *testing.T) {
+	tokens, percent := 90000, 70.3
+	compactErr := ""
+	var instructions []string
+	opts := Options{
+		Cwd:          t.TempDir(),
+		ContextUsage: map[string]any{"tokens": tokens, "contextWindow": 128000, "percent": percent},
+		SystemPrompt: "SYS",
+		ModelInfo:    map[string]any{"id": "m1", "provider": "p", "contextWindow": 128000},
+		CompactResult: func(o map[string]any) (map[string]any, error) {
+			instructions = append(instructions, o["customInstructions"].(string))
+			if compactErr != "" {
+				return nil, errString(compactErr)
+			}
+			return map[string]any{"summary": "S1", "firstKeptEntryId": "e2", "tokensBefore": 5}, nil
+		},
+	}
+	var order []string
+	type outcome struct {
+		result map[string]any
+		err    error
+	}
+	done := make(chan outcome, 1)
+	ext := sdk.New("probe")
+	ext.OnEvent(sdk.EventSessionCompact, func(sdk.Context, map[string]any) (any, error) {
+		order = append(order, "session_compact")
+		return nil, nil
+	})
+	var idle bool
+	var usage *sdk.ContextUsage
+	var prompt string
+	var model *sdk.ModelInfo
+	var projection sdk.SessionProjection
+	var branch []map[string]any
+	ext.Tool("probe", "probe", sdk.Schema{"type": "object"}, func(ctx sdk.Context, p map[string]any) (any, error) {
+		idle, _ = ctx.IsIdle()
+		usage, _ = ctx.GetContextUsage()
+		prompt, _ = ctx.GetSystemPrompt()
+		model, _ = ctx.GetModelInfo()
+		_ = ctx.AppendEntry("occ", map[string]any{"k": 1})
+		projection, _ = ctx.SessionManager().BuildSessionProjection()
+		branch, _ = ctx.SessionManager().GetBranch(nil)
+		ctx.Abort()
+		_ = ctx.SendMessage("occ-continue", "go on", false, sdk.SendMessageOptions{TriggerTurn: sdk.Bool(true)})
+		ctx.CompactWithOptions(sdk.CompactOptions{
+			CustomInstructions: "focus",
+			OnComplete:         func(r map[string]any) { order = append(order, "complete"); done <- outcome{result: r} },
+			OnError:            func(err error) { done <- outcome{err: err} },
+		})
+		return "ok", nil
+	})
+	h := Start(t, ext, opts)
+	if res := h.CallTool("probe", "c1", map[string]any{}); res.Err != nil {
+		t.Fatal(res.Err)
+	}
+	got := <-done
+	if got.err != nil || got.result["summary"] != "S1" {
+		t.Fatalf("outcome = %+v", got)
+	}
+	if len(order) != 2 || order[0] != "session_compact" || order[1] != "complete" {
+		t.Fatalf("order = %v, want session_compact before complete", order)
+	}
+	if !idle || usage == nil || *usage.Tokens != tokens || usage.ContextWindow != 128000 || prompt != "SYS" || model == nil || model.ContextWindow != 128000 {
+		t.Fatalf("answers: idle=%v usage=%+v prompt=%q model=%+v", idle, usage, prompt, model)
+	}
+	if len(projection.Entries) != 1 || len(projection.Entries[0].Messages) != 0 || projection.Entries[0].SourceEntry["customType"] != "occ" || len(branch) != 1 {
+		t.Fatalf("projection = %+v branch = %v", projection, branch)
+	}
+	if h.Aborts() != 1 {
+		t.Fatalf("aborts = %d", h.Aborts())
+	}
+	msgs := h.Messages()
+	if len(msgs) != 1 || msgs[0].Args["customType"] != "occ-continue" || msgs[0].Args["content"] != "go on" || msgs[0].Args["display"] != false || msgs[0].Args["options"].(map[string]any)["triggerTurn"] != true {
+		t.Fatalf("messages = %+v", msgs)
+	}
+	if len(instructions) != 1 || instructions[0] != "focus" {
+		t.Fatalf("compact options = %v", instructions)
+	}
+
+	compactErr = "Nothing to compact (session too small)"
+	if res := h.CallTool("probe", "c2", map[string]any{}); res.Err != nil {
+		t.Fatal(res.Err)
+	}
+	got = <-done
+	if got.err == nil || !strings.Contains(got.err.Error(), compactErr) {
+		t.Fatalf("OnError = %v, want %q", got.err, compactErr)
+	}
+}
+
+func TestIdleDefaultsToTrueAndFollowsSetIdle(t *testing.T) {
+	var idle bool
+	h := probeHost(t, Options{}, func(ctx sdk.Context) { idle, _ = ctx.IsIdle() })
+	if !idle {
+		t.Fatal("default isIdle = false, want true")
+	}
+	h.SetIdle(false)
+	if res := h.CallTool("probe", "c2", map[string]any{}); res.Err != nil || idle {
+		t.Fatalf("after SetIdle(false): idle=%v err=%v", idle, res.Err)
+	}
+	f := false
+	probeHost(t, Options{Idle: &f}, func(ctx sdk.Context) { idle, _ = ctx.IsIdle() })
+	if idle {
+		t.Fatal("Options.Idle=false ignored")
+	}
+}
+
+func TestContextHandlersChainEdits(t *testing.T) {
+	ext := sdk.New("probe")
+	var sawSecond any
+	ext.OnEvent(sdk.EventContext, func(ctx sdk.Context, d map[string]any) (any, error) {
+		return map[string]any{"messages": []any{map[string]any{"role": "user", "content": "edited"}}}, nil
+	})
+	ext.OnEvent(sdk.EventContext, func(ctx sdk.Context, d map[string]any) (any, error) {
+		sawSecond = d["messages"]
+		return nil, nil
+	})
+	h := Start(t, ext, Options{Cwd: t.TempDir()})
+	held, replaced := h.EmitContext([]any{map[string]any{"role": "user", "content": "orig"}})
+	list, _ := sawSecond.([]any)
+	if len(list) != 1 || list[0].(map[string]any)["content"] != "edited" {
+		t.Fatalf("second handler saw %v, want the first handler's edit", sawSecond)
+	}
+	if !replaced || len(held) != 1 || held[0].(map[string]any)["content"] != "edited" {
+		t.Fatalf("held = %v replaced = %v", held, replaced)
+	}
+}
+
+type errString string
+
+func (e errString) Error() string { return string(e) }
