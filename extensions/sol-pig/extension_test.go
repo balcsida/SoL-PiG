@@ -111,3 +111,34 @@ func TestProjectConfigNeedsTrust(t *testing.T) {
 		t.Fatalf("trusted project config not applied: %v", names)
 	}
 }
+
+func TestSessionStartRegistersActionFusion(t *testing.T) {
+	agentDir(t, `{"version":1,"actionFusion":true}`)
+	h := testhost.Start(t, Extension(), testhost.Options{Cwd: t.TempDir()})
+	if _, err := h.Emit("session_start", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if names := strings.Join(toolNames(h), ","); names != "edit,write" {
+		t.Fatalf("tools = %v", names)
+	}
+}
+
+func TestActionFusionRegistersBeforeObservationPack(t *testing.T) {
+	agentDir(t, `{"version":1,"actionFusion":true,"observationPack":true}`)
+	h := testhost.Start(t, Extension(), testhost.Options{Cwd: t.TempDir()})
+	if _, err := h.Emit("session_start", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if names := strings.Join(toolNames(h), ","); names != "edit,write,obs_recall" {
+		t.Fatalf("tools = %v", names)
+	}
+}
+
+func TestShellSettingsErrorFailsSessionStart(t *testing.T) {
+	agentDir(t, `{"version":1,"actionFusion":true,"observationPack":true}`)
+	h := testhost.Start(t, Extension(), testhost.Options{Cwd: t.TempDir(), SettingsErrors: []string{"bad settings"}})
+	_, err := h.Emit("session_start", map[string]any{})
+	if err == nil || !strings.Contains(err.Error(), "Action Fusion could not load Pi shell settings: bad settings") || len(h.Tools()) != 0 {
+		t.Fatalf("err = %v, tools = %v", err, toolNames(h))
+	}
+}

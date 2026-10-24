@@ -12,6 +12,7 @@ import (
 
 	sdk "github.com/MichaelKinsy/PiG/extensions/sdk"
 
+	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/actionfusion"
 	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/config"
 	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/observationpack"
 )
@@ -25,9 +26,13 @@ func Extension() *sdk.Extension {
 	ext.OnSessionStart(func(ctx sdk.Context, data map[string]any) (any, error) {
 		var err error
 		once.Do(func() {
-			var cfg config.Config
-			if cfg, err = loadConfig(ctx); err == nil {
-				registerConfigured(ext, cfg)
+			var (
+				cfg      config.Config
+				agentDir string
+				trusted  bool
+			)
+			if cfg, agentDir, trusted, err = loadConfig(ctx); err == nil {
+				err = registerConfigured(ext, ctx, cfg, agentDir, trusted)
 			}
 		})
 		return nil, err
@@ -37,27 +42,38 @@ func Extension() *sdk.Extension {
 
 // loadConfig reads sol-pi.json from the directories the host itself resolves:
 // Pi's getAgentDir() and CONFIG_DIR_NAME, as PiG hands them to every extension.
-func loadConfig(ctx sdk.Context) (config.Config, error) {
-	agentDir, err := sdk.AgentDir()
+func loadConfig(ctx sdk.Context) (cfg config.Config, agentDir string, trusted bool, err error) {
+	agentDir, err = sdk.AgentDir()
 	if err != nil {
-		return config.Config{}, err
+		return config.Config{}, "", false, err
 	}
 	dirName, err := sdk.ConfigDirName()
 	if err == nil && dirName == "" {
 		err = sdk.ErrHostInfoUnavailable
 	}
 	if err != nil {
-		return config.Config{}, err
+		return config.Config{}, "", false, err
 	}
-	trusted, _ := ctx.IsProjectTrusted()
-	return config.Load(ctx.Cwd(), dirName, agentDir, trusted)
+	trusted, _ = ctx.IsProjectTrusted()
+	cfg, err = config.Load(ctx.Cwd(), dirName, agentDir, trusted)
+	return cfg, agentDir, trusted, err
 }
 
 // registerConfigured registers the enabled mechanisms in SoL-Pi's order:
 // Action Fusion, ObservationPack, Evidence-Preserving Reducer, Online Context
 // Compact. OCC's context handler must run after ObservationPack's.
-func registerConfigured(ext *sdk.Extension, cfg config.Config) {
+func registerConfigured(ext *sdk.Extension, ctx sdk.Context, cfg config.Config, agentDir string, trusted bool) error {
+	if cfg.ActionFusion {
+		shell, err := actionfusion.LoadShellOptions(ctx, agentDir, trusted)
+		if err != nil {
+			return err
+		}
+		if err := actionfusion.Register(ext, ctx, shell); err != nil {
+			return err
+		}
+	}
 	if cfg.ObservationPack {
 		observationpack.Register(ext)
 	}
+	return nil
 }
