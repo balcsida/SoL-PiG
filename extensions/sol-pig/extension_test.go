@@ -173,3 +173,14 @@ func TestActionFusionPassesProjectTrustToShellSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionStartRegistersReducer(t *testing.T) {
+	agentDir(t, `{"version":1,"evidencePreservingReducer":true}`)
+	h := testhost.Start(t, Extension(), testhost.Options{Cwd: t.TempDir()})
+	if _, err := h.Emit("session_start", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.Handlers("tool_result")) != 1 || len(h.Tools()) != 0 {
+		t.Fatalf("tool_result handlers = %v tools = %v", h.Handlers("tool_result"), toolNames(h))
+	}
+}

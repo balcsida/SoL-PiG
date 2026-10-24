@@ -15,6 +15,7 @@ import (
 	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/actionfusion"
 	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/config"
 	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/observationpack"
+	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/reducer"
 )
 
 // Extension is the factory PiG loads. It registers only session_start; the
@@ -74,6 +75,9 @@ func registerConfigured(ext *sdk.Extension, ctx sdk.Context, cfg config.Config, 
 	}
 	if cfg.ObservationPack {
 		observationpack.Register(ext)
+	}
+	if cfg.EvidencePreservingReducer {
+		reducer.Register(ext, reducer.Options{Provider: cfg.ReducerProvider, Model: cfg.ReducerModel})
 	}
 	return nil
 }
