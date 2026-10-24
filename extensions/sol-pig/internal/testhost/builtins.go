@@ -194,6 +194,7 @@ func localBash(cwd string, params, options map[string]any) (any, error) {
 	}
 	cmd := exec.CommandContext(ctx, shell, "-c", command)
 	cmd.Dir = cwd
+	cmd.WaitDelay = 100 * time.Millisecond // a grandchild holding the pipe open must not outlast the timeout
 	out, err := cmd.CombinedOutput()
 	if hasTimeout && ctx.Err() != nil {
 		return nil, fmt.Errorf("Command timed out after %v seconds", timeout)

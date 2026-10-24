@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	sdk "github.com/MichaelKinsy/PiG/extensions/sdk"
 )
@@ -224,6 +225,24 @@ func TestSettingsManagerShellOptions(t *testing.T) {
 		}
 		if p, _ := sm.GetShellPath(); p != nil {
 			t.Errorf("GetShellPath = %v, want nil", *p)
+		}
+	})
+}
+
+func TestBuiltinBashTimeoutDoesNotWaitForGrandchildren(t *testing.T) {
+	probeHost(t, Options{}, func(ctx sdk.Context) {
+		bash, err := sdk.CreateBashToolDefinition(ctx.Cwd(), nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		start := time.Now()
+		_, err = bash.Execute(ctx, map[string]any{"command": "sleep 5; echo x", "timeout": 0.2})
+		if err == nil || !strings.Contains(err.Error(), "Command timed out after 0.2 seconds") {
+			t.Errorf("err = %v", err)
+		}
+		if elapsed := time.Since(start); elapsed > 3*time.Second {
+			t.Errorf("timeout took %v", elapsed)
 		}
 	})
 }
