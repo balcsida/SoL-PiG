@@ -200,12 +200,9 @@ func TestMutationErrorSkipsCommand(t *testing.T) {
 		"path": "f.txt", "edits": []any{map[string]any{"oldText": "nope", "newText": "x"}},
 		"then_run": map[string]any{"command": "true"},
 	})
-	if res.Err != nil || !res.IsError {
-		t.Fatalf("want an IsError result, got %+v", res)
-	}
-	got := texts(t, res.Content)
-	if want := "[then_run:skipped] The file mutation did not complete successfully; the command was not run."; got[len(got)-1] != want {
-		t.Fatalf("content = %q, want last block %q", got, want)
+	const skipped = "[then_run:skipped] The file mutation did not complete successfully; the command was not run."
+	if res.Err == nil || !strings.HasSuffix(res.Err.Error(), skipped) {
+		t.Fatalf("want a thrown error ending in %q, got %+v", skipped, res)
 	}
 	for _, c := range h.BuiltinCalls() {
 		if c.Name == "bash" {

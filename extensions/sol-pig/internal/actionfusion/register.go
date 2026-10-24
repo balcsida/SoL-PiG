@@ -134,6 +134,9 @@ func (f *fusion) execute(pick func(builtins) sdk.BuiltinToolDefinition) sdk.Tool
 		id := ctx.ToolCallID()
 		// The run's abort signal (nil when no run is active) so Esc stops the mutation and the command.
 		signal := ctx.Signal()
+		// Both built-in calls pass an explicit signal and so stay detached from the SDK's tool-start ordering;
+		// an ordered host call (ctx.Notify, or Execute without a signal) inside the queued section could deadlock
+		// two same-file calls of one batch, so savings are shown only after the queue is released.
 		result, status, err := Run(Fused{
 			AbsolutePath: abs,
 			ThenRun:      thenRun,

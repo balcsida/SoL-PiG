@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 SoL-PiG contributors
 // SPDX-License-Identifier: MIT
 //
-// Ported from PiG internal/codingagent/tools/edit.go at v0.5.3 (Hewlett Packard Enterprise Development LP, MIT; derived from Pi, Mario Zechner, MIT).
+// Ported from PiG internal/codingagent/tools/edit.go at v0.5.3 (Copyright Michael Kinsy, MIT; derived from Pi, Mario Zechner, MIT).
 
 package actionfusion
 

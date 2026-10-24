@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 SoL-PiG contributors
+// SPDX-License-Identifier: MIT
+
 package actionfusion
 
 import (

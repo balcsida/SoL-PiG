@@ -9,7 +9,7 @@ https://github.com/NVlabs/SoL-Pi — MIT. Ported from commit `2195680`.
 
 ## PiG
 
-Copyright Hewlett Packard Enterprise Development LP.
+Copyright Michael Kinsy.
 https://github.com/MichaelKinsy/PiG — MIT. Code copied from tag `v0.5.3` (added as later plans copy it).
 
 ## Pi

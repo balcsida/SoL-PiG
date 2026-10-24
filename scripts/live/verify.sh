@@ -10,7 +10,8 @@
 # runs one `pig -p` session against PiG's built-in fake provider with
 # ObservationPack enabled, measures the idle footprint of one instance, and
 # plays a scripted scenario through a local OpenAI-compatible endpoint
-# (scripts/live/mockprovider) that proves the placeholder and obs_recall.
+# (scripts/live/mockprovider) that proves the placeholder and obs_recall, then a scripted Action Fusion scenario
+# (then_run inside write and edit) and a fake-provider parity check of the built-in tools with it off and on.
 # Everything runs in a throwaway HOME; no credential or network provider is used.
 set -euo pipefail
 

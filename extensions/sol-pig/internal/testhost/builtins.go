@@ -174,7 +174,7 @@ func localEdit(cwd string, params map[string]any) (any, error) {
 		oldText, _ := entry["oldText"].(string)
 		newText, _ := entry["newText"].(string)
 		if oldText == "" || strings.Count(original, oldText) != 1 {
-			return textResult(true, "Could not edit file: "+path+". Error: oldText not found or not unique."), nil
+			return nil, fmt.Errorf("Could not edit file: %s. Error: oldText not found or not unique.", path)
 		}
 		replacements = append(replacements, replacement{oldText, newText})
 	}

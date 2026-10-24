@@ -157,14 +157,9 @@ func TestBuiltinEditThroughTheHost(t *testing.T) {
 		if data, _ := os.ReadFile(path); string(data) != "alpha gamma" {
 			t.Errorf("f.txt = %q", data)
 		}
-		res, err = edit.Execute(ctx, edits("zeta", "x"))
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		miss := res.(sdk.AgentToolResult)
-		if !miss.IsError || !strings.Contains(firstText(t, miss), "Could not edit file") {
-			t.Errorf("missing oldText result = %+v", miss)
+		// PiG throws on a missing oldText, so the SDK surfaces a Go error.
+		if _, err = edit.Execute(ctx, edits("zeta", "x")); err == nil || !strings.Contains(err.Error(), "Could not edit file") {
+			t.Errorf("missing oldText error = %v", err)
 		}
 	})
 }

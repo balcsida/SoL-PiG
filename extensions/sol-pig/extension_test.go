@@ -142,3 +142,34 @@ func TestShellSettingsErrorFailsSessionStart(t *testing.T) {
 		t.Fatalf("err = %v, tools = %v", err, toolNames(h))
 	}
 }
+
+// settingsManagerArgs returns the create arguments of the SettingsManager the extension opened at session_start.
+func settingsManagerArgs(t *testing.T, h *testhost.Host) []any {
+	t.Helper()
+	for _, c := range h.Calls("sessionGraph.new") {
+		if c.Args["kind"] == "SettingsManager" {
+			args, _ := c.Args["args"].([]any)
+			return args
+		}
+	}
+	t.Fatalf("no SettingsManager created: %v", h.Calls("sessionGraph.new"))
+	return nil
+}
+
+func TestActionFusionPassesProjectTrustToShellSettings(t *testing.T) {
+	for _, trusted := range []bool{false, true} {
+		dir := agentDir(t, `{"version":1,"actionFusion":true}`)
+		h := testhost.Start(t, Extension(), testhost.Options{Cwd: t.TempDir(), ProjectTrusted: trusted})
+		if _, err := h.Emit("session_start", map[string]any{}); err != nil {
+			t.Fatal(err)
+		}
+		args := settingsManagerArgs(t, h)
+		if len(args) != 3 || args[1] != dir {
+			t.Fatalf("trusted=%v: args = %v, want agent dir %q", trusted, args, dir)
+		}
+		opts, _ := args[2].(map[string]any)
+		if opts["projectTrusted"] != trusted {
+			t.Fatalf("trusted=%v: options = %v", trusted, opts)
+		}
+	}
+}
