@@ -10,6 +10,6 @@ pig install git:github.com/balcsida/SoL-PiG
 
 ```bash
 cd extensions/sol-pig && go vet ./... && go test ./...   # unit and fake-host tests, zero spend
-scripts/live/verify.sh                                    # real pig 0.5.3 with its fake provider, zero spend
+scripts/live/verify.sh                                    # real pig 0.5.3: fake provider + scripted endpoint, zero spend
 pig install "$PWD" --validate-only --json                 # does PiG accept the package?
 ```

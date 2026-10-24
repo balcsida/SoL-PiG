@@ -8,7 +8,9 @@
 #
 # Builds and registers the extension through `pig install --validate-only`,
 # runs one `pig -p` session against PiG's built-in fake provider with
-# ObservationPack enabled, and measures the idle footprint of one instance.
+# ObservationPack enabled, measures the idle footprint of one instance, and
+# plays a scripted scenario through a local OpenAI-compatible endpoint
+# (scripts/live/mockprovider) that proves the placeholder and obs_recall.
 # Everything runs in a throwaway HOME; no credential or network provider is used.
 set -euo pipefail
 
@@ -69,5 +71,45 @@ done
 wait "$PIG_PID" 2>/dev/null || true
 [ "$PROCS" -ge 2 ] || fail "expected pig and its extension runner, saw $PROCS process(es)"
 echo "3. idle footprint: $((TOTAL_KB / 1024)) MiB across $PROCS processes (pig + extension runner)"
+
+# 4. ObservationPack end to end against a scripted endpoint: full, full, placeholder, recall.
+MOCK_LOG="$WORK/mock-log"
+( cd "$ROOT/scripts/live/mockprovider" && exec go run . -addr 127.0.0.1:0 -log-dir "$MOCK_LOG" -scenario observation-pack ) \
+  > "$WORK/mock.stdout" 2> "$WORK/mock.stderr" &
+MOCK_PID=$!
+trap 'kill $MOCK_PID 2>/dev/null' EXIT
+for _ in $(seq 1 120); do [ -s "$MOCK_LOG/addr" ] && break; sleep 0.5; done
+[ -s "$MOCK_LOG/addr" ] || fail "the scripted endpoint did not start (see $WORK/mock.stderr)"
+ADDR=$(cat "$MOCK_LOG/addr")
+cat > "$PIG_CODING_AGENT_DIR/models.json" <<JSON
+{"providers":{"mock":{"baseUrl":"http://$ADDR/v1","api":"openai-completions","apiKey":"mock","models":[{"id":"mock-1","name":"Mock","contextWindow":128000,"maxTokens":4096}]}}}
+JSON
+cd "$HOME/cwd"
+pig --offline --no-session --model mock/mock-1 --mode json -p 'Run the scripted scenario.' > "$WORK/scenario.jsonl" 2> "$WORK/scenario.stderr" \
+  || fail "scripted session exited $? (see $WORK/scenario.stderr)"
+grep -q 'All done\.' "$WORK/scenario.jsonl" || fail "the scripted session did not reach its final answer (see $WORK/scenario.jsonl)"
+SUMMARIES="$MOCK_LOG/requests.jsonl"
+AGENT=$(grep -c '"kind":"agent"' "$SUMMARIES" || true)
+[ "$AGENT" -eq 5 ] || fail "expected 5 agent requests, saw $AGENT: $(cat "$SUMMARIES")"
+agent_line() { grep '"kind":"agent"' "$SUMMARIES" | sed -n "${1}p"; }
+first_bytes() { sed -E 's/.*"toolResultBytes":\[([0-9]+).*/\1/' <<<"$1"; }
+L2=$(agent_line 2); L3=$(agent_line 3); L4=$(agent_line 4)
+{ grep -q '"toolResults":1,' <<<"$L2" && [ "$(first_bytes "$L2")" -gt 10240 ] && grep -q '"placeholders":0' <<<"$L2"; } \
+  || fail "request 2 should carry the full result: $L2"
+grep -q '"placeholders":0' <<<"$L3" || fail "request 3 should still carry the full result: $L3"
+{ grep -q '"placeholders":1' <<<"$L4" && [ "$(first_bytes "$L4")" -lt 2048 ]; } || fail "request 4 should carry the placeholder: $L4"
+{ grep -q '\[obs_recall id=obs_' "$MOCK_LOG/request-005-agent.json" && grep -q 'chunk_bytes=' "$MOCK_LOG/request-005-agent.json"; } \
+  || fail "request 5 lacks the obs_recall result"
+LEDGER=$(ls -dt "$WORK"/tmp/sol-pi-* | head -1)/observation-pack/ledger.jsonl
+[ -f "$LEDGER" ] || fail "no ObservationPack ledger under $WORK/tmp/sol-pi-*"
+EVENTS=$(sed -E 's/.*"event":"([a-z]+)".*/\1/' "$LEDGER" | tr '\n' ' ')
+case "$EVENTS" in "full full placeholder recall"*) ;; *) fail "ledger events: $EVENTS" ;; esac
+grep -q '"sendNumber":3' "$LEDGER" || fail "the placeholder entry lacks sendNumber 3"
+FIRST=$(sed -n 1p "$LEDGER")
+OBJECT="$(dirname "$LEDGER")/objects/$(sed -E 's/.*"id":"(obs_[a-f0-9]{24})".*/\1/' <<<"$FIRST").txt"
+ORIG=$(sed -E 's/.*"originalBytes":([0-9]+).*/\1/' <<<"$FIRST")
+[ "$(wc -c < "$OBJECT" | tr -d ' ')" -eq "$ORIG" ] || fail "archived object $OBJECT does not hold the $ORIG original bytes"
+kill "$MOCK_PID" 2>/dev/null; wait "$MOCK_PID" 2>/dev/null || true
+echo "4. scripted endpoint: placeholder on the third send, obs_recall returned the bytes"
 
 echo "verify.sh: ok"
