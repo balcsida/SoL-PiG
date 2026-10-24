@@ -34,6 +34,10 @@ type Options struct {
 
 	ShellPath, ShellCommandPrefix *string  // answers for the SettingsManager; nil → JSON null
 	SettingsErrors                []string // drainErrors returns one global-scope error per entry
+
+	Models     map[string]map[string]any                   // "provider/id" → model map for getModel; absent → null
+	ModelReply func(request map[string]any) map[string]any // final assistant message of modelStream; nil → stopReason "error"
+	ModelDelay time.Duration                               // holds the modelStream reply; ends early when the host stops
 }
 
 // Call is one recorded extension→host call.
@@ -106,6 +110,7 @@ type Host struct {
 	opts Options
 	conn net.Conn
 	done chan error
+	stop chan struct{} // closed at cleanup, releasing a held modelStream reply
 
 	writeMu sync.Mutex
 
@@ -121,6 +126,7 @@ type Host struct {
 	nextID     uint64
 	handles    uint64
 	cancels    map[string]context.CancelFunc // in-flight builtinTool.execute by executeId
+	modelReqs  []map[string]any
 }
 
 // Start runs ext against a fake host and returns once the handshake is done.
@@ -134,7 +140,7 @@ func Start(t *testing.T, ext *sdk.Extension, opts Options) *Host {
 	}
 	hostConn, extConn := net.Pipe()
 	h := &Host{
-		t: t, opts: opts, conn: hostConn, done: make(chan error, 1),
+		t: t, opts: opts, conn: hostConn, done: make(chan error, 1), stop: make(chan struct{}),
 		registered: map[string][]int{}, handlers: map[string][]int{}, tools: map[string]ToolDecl{},
 		scripted: map[string]func(map[string]any) (any, error){}, pending: map[string]chan responseMsg{},
 	}
@@ -169,6 +175,7 @@ func Start(t *testing.T, ext *sdk.Extension, opts Options) *Host {
 	})
 	go h.readLoop()
 	t.Cleanup(func() {
+		close(h.stop)
 		_ = hostConn.Close()
 		select {
 		case <-h.done:
@@ -219,6 +226,13 @@ func (h *Host) Calls(method string) []Call {
 		}
 	}
 	return out
+}
+
+// ModelRequests returns the request of every modelStream call (the request merged with its options), in order.
+func (h *Host) ModelRequests() []map[string]any {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.modelReqs)
 }
 
 // Entries returns the custom entries appended so far, as getBranch serves them.
@@ -405,8 +419,8 @@ func (h *Host) handleCall(id string, call *callMsg) {
 		return
 	}
 	args := h.record(call.Method, call.Args)
-	if call.Method == "builtinTool.execute" {
-		// Runs aside so an executeTool.cancel can arrive while the tool is still running.
+	if call.Method == "builtinTool.execute" || call.Method == "modelStream" {
+		// Runs aside so an executeTool.cancel can arrive, or a delayed model reply wait, without stalling the read loop.
 		go h.finishCall(id, call, args)
 		return
 	}
@@ -475,6 +489,15 @@ func (h *Host) reply(method string, raw json.RawMessage, args map[string]any) (a
 		handle := fmt.Sprintf("h%d-%v", h.handles, args["kind"])
 		h.mu.Unlock()
 		return map[string]any{"handle": handle}, nil
+	case "getModel":
+		provider, _ := args["provider"].(string)
+		modelID, _ := args["modelId"].(string)
+		if model, ok := h.opts.Models[provider+"/"+modelID]; ok {
+			return model, nil
+		}
+		return nil, nil
+	case "modelStream":
+		return h.modelStream(args)
 	case "builtinTool.definition":
 		return h.builtinDefinition(args)
 	case "builtinTool.execute":
@@ -554,6 +577,39 @@ func (h *Host) writeEnvelope(value any) {
 	h.writeMu.Lock()
 	defer h.writeMu.Unlock()
 	if _, err := h.conn.Write(frame); err != nil {
+		select {
+		case <-h.stop: // a reply written after the test finished, e.g. modelStream's call result
+			return
+		default:
+		}
 		h.t.Errorf("write frame: %v", err)
 	}
+}
+
+// modelStream answers like the host: one model_stream_event notification with the
+// terminal event ("error" for a failed message, else "done"), then an empty call result.
+func (h *Host) modelStream(args map[string]any) (any, error) {
+	request, _ := args["request"].(map[string]any)
+	h.mu.Lock()
+	h.modelReqs = append(h.modelReqs, request)
+	h.mu.Unlock()
+	if h.opts.ModelDelay > 0 {
+		select {
+		case <-time.After(h.opts.ModelDelay):
+		case <-h.stop:
+			return nil, fmt.Errorf("host stopped")
+		}
+	}
+	message := map[string]any{"role": "assistant", "content": []any{}, "stopReason": "error", "errorMessage": "no model scripted"}
+	if h.opts.ModelReply != nil {
+		message = h.opts.ModelReply(request)
+	}
+	event := map[string]any{"type": "done", "reason": message["stopReason"], "message": message}
+	if reason, _ := message["stopReason"].(string); reason == "error" || reason == "aborted" {
+		event = map[string]any{"type": "error", "reason": reason, "error": message}
+	}
+	h.writeEnvelope(map[string]any{"type": "notify", "notify": map[string]any{
+		"method": "model_stream_event", "args": map[string]any{"streamId": args["streamId"], "event": event},
+	}})
+	return map[string]any{}, nil
 }

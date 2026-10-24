@@ -241,3 +241,60 @@ func TestBuiltinBashTimeoutDoesNotWaitForGrandchildren(t *testing.T) {
 		}
 	})
 }
+
+var fauxModel = map[string]any{"id": "faux-1", "provider": "test-faux", "name": "Faux", "api": "openai-completions", "maxTokens": 4096.0, "contextWindow": 128000.0}
+
+func fauxReply(text string) map[string]any {
+	return map[string]any{
+		"role": "assistant", "content": []any{map[string]any{"type": "text", "text": text}}, "stopReason": "stop",
+		"provider": "test-faux", "model": "faux-1",
+	}
+}
+
+func TestModelRegistryFindAndComplete(t *testing.T) {
+	var found, missing, reply map[string]any
+	var findErr, missingErr error
+	h := probeHost(t, Options{
+		Models:     map[string]map[string]any{"test-faux/faux-1": fauxModel},
+		ModelReply: func(map[string]any) map[string]any { return fauxReply("scripted") },
+	}, func(ctx sdk.Context) {
+		found, findErr = ctx.ModelRegistry().Find("test-faux", "faux-1")
+		missing, missingErr = ctx.ModelRegistry().Find("x", "y")
+		reply = ctx.ModelRegistry().Complete(found,
+			map[string]any{"systemPrompt": "s", "messages": []any{map[string]any{"role": "user", "content": "hi"}}},
+			map[string]any{"maxTokens": 2048, "cacheRetention": "none", "sessionId": "r1", "timeoutMs": 90000})
+	})
+	if findErr != nil || found["id"] != "faux-1" || missingErr != nil || missing != nil {
+		t.Fatalf("Find = %v, %v; missing = %v, %v", found, findErr, missing, missingErr)
+	}
+	if text := reply["content"].([]any)[0].(map[string]any)["text"]; reply["stopReason"] != "stop" || text != "scripted" {
+		t.Fatalf("Complete = %v", reply)
+	}
+	reqs := h.ModelRequests()
+	if len(reqs) != 1 || reqs[0]["maxTokens"] != float64(2048) || reqs[0]["systemPrompt"] != "s" {
+		t.Fatalf("ModelRequests = %v", reqs)
+	}
+}
+
+func TestModelCompleteWithoutScriptedReplyIsAnError(t *testing.T) {
+	var reply map[string]any
+	probeHost(t, Options{}, func(ctx sdk.Context) { reply = ctx.ModelRegistry().Complete(fauxModel, map[string]any{}, nil) })
+	if reply["stopReason"] != "error" || reply["errorMessage"] != "no model scripted" {
+		t.Fatalf("Complete = %v", reply)
+	}
+}
+
+func TestModelReplyDelay(t *testing.T) {
+	var took time.Duration
+	probeHost(t, Options{
+		ModelDelay: 300 * time.Millisecond,
+		ModelReply: func(map[string]any) map[string]any { return fauxReply("late") },
+	}, func(ctx sdk.Context) {
+		start := time.Now()
+		ctx.ModelRegistry().Complete(fauxModel, map[string]any{}, nil)
+		took = time.Since(start)
+	})
+	if took < 300*time.Millisecond {
+		t.Fatalf("Complete returned after %v, want >= 300ms", took)
+	}
+}
