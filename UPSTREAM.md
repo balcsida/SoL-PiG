@@ -1,0 +1,7 @@
+# Upstream provenance
+
+SoL-Pi reference: https://github.com/NVlabs/SoL-Pi at commit `2195680` (2026-10-18).
+PiG reference: https://github.com/MichaelKinsy/PiG at tag `v0.5.3`.
+
+| file | source | commit |
+|---|---|---|
