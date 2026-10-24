@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 const (
@@ -29,6 +30,16 @@ var planStatuses = []string{"pending", "in_progress", "completed"}
 func boundedString(v any) (string, bool) {
 	s, ok := v.(string)
 	return s, ok && s != "" && len(s) <= maxPlanStringBytes
+}
+
+// marshalUnescaped matches JSON.stringify, which leaves <, > and & alone
+// (U+2028/U+2029 are still escaped by Go, unlike JSON.stringify).
+func marshalUnescaped(v any) string {
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v) // plain strings and structs of strings cannot fail
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // ParsePlanSteps ports parsePlanSteps; value is a JSON-decoded array.
@@ -74,7 +85,7 @@ func AnalyzePlanTransition(previous, next []Step) Transition {
 				t.CompletedIDs = append(t.CompletedIDs, s.ID)
 			}
 			if prior.Goal != s.Goal {
-				quoted, _ := json.Marshal(s.ID)
+				quoted := marshalUnescaped(s.ID)
 				t.Advice = append(t.Advice, fmt.Sprintf("Plan step %s changed goal; reuse an id only for the same goal.", quoted))
 			}
 		}
@@ -99,8 +110,8 @@ func FormatPlanSnapshot(steps []Step) string {
 	if steps == nil {
 		steps = []Step{}
 	}
-	raw, _ := json.Marshal(struct {
+	raw := marshalUnescaped(struct {
 		Steps []Step `json:"steps"`
 	}{steps})
-	return `<sol-pi-plan task_status="active">` + string(raw) + `</sol-pi-plan>`
+	return `<sol-pi-plan task_status="active">` + raw + `</sol-pi-plan>`
 }

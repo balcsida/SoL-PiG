@@ -198,3 +198,40 @@ func TestDecideNoCooldownBeforeFirstCompaction(t *testing.T) {
 		t.Fatalf("got %v", *d.RequestsSinceLastCompaction)
 	}
 }
+
+func TestDecideFirstCompactionScalesHorizon(t *testing.T) {
+	in := baseInput()
+	in.CacheWriteReadRatio = ptr(85.0) // breakeven 84*21000/59000 ≈ 29.9: above expected 21, below 2×21
+	wantDecision(t, DecideCompaction(in), true, "economic")
+	in.CacheWriteReadRatio = ptr(120.0) // breakeven ≈ 42.4: past 2×21, under the window bound 60
+	wantDecision(t, DecideCompaction(in), false, "deferred_economic")
+	in.CacheWriteReadRatio = ptr(85.0)
+	in.PriorCompactionCount = 1 // unscaled horizon: the base gate fails, so no margin or debt deferral applies
+	wantDecision(t, DecideCompaction(in), false, "deferred_economic")
+}
+
+func TestDecideFirstCompactionCappedByWindowBound(t *testing.T) {
+	in := baseInput()
+	in.AverageContextTokenIncrement = ptr(4000.0) // window bound 30 < 2×21
+	in.CacheWriteReadRatio = ptr(71.0)            // breakeven ≈ 24.9, under the cap
+	wantDecision(t, DecideCompaction(in), true, "economic")
+	in.CacheWriteReadRatio = ptr(99.0) // breakeven ≈ 34.9: over the cap, under 42
+	wantDecision(t, DecideCompaction(in), false, "deferred_economic")
+}
+
+func TestDecideFirstCompactionNeedsPositiveHorizon(t *testing.T) {
+	in := baseInput()
+	in.ContextTokens = 199999
+	in.Economics.WindowReserveTokens = 0
+	in.CacheWriteReadRatio = ptr(1.0) // breakeven 0
+	wantDecision(t, DecideCompaction(in), false, "deferred_economic")
+	in.PriorCompactionCount = 1
+	wantDecision(t, DecideCompaction(in), false, "deferred_economic")
+}
+
+func TestDecideCarriedDebtIgnoredBeforeFirstCompaction(t *testing.T) {
+	in := baseInput()
+	in.CacheWriteReadRatio = ptr(2.0)
+	in.CarriedDebtTokens = 2000000
+	wantDecision(t, DecideCompaction(in), true, "economic")
+}

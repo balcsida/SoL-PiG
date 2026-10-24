@@ -196,12 +196,20 @@ func (s State) RecordProviderRequest(contextTokens int) State {
 	return s
 }
 
+// normalizedProgress turns nil lists into empty ones so the entry marshals as arrays.
+func normalizedProgress(p Progress) Progress {
+	for _, l := range []*[]string{&p.FilesChanged, &p.Verification, &p.Decisions, &p.NextWork} {
+		*l = append([]string{}, *l...)
+	}
+	return p
+}
+
 // RecordBoundary ports recordBoundary.
 func (s State) RecordBoundary(plan []Step, progress *Progress) State {
 	interval := max(0, s.RequestCount-s.LastBoundaryRequestCount)
-	s.Plan = slices.Clone(plan)
+	s.Plan = append([]Step{}, plan...)
 	if progress != nil {
-		s.PendingProgress = append(slices.Clone(s.PendingProgress), *progress)
+		s.PendingProgress = append(slices.Clone(s.PendingProgress), normalizedProgress(*progress))
 	}
 	s.LastBoundaryRequestCount = s.RequestCount
 	s.CompletedBoundaryRequestCounts = append(slices.Clone(s.CompletedBoundaryRequestCounts), interval)
@@ -213,7 +221,7 @@ func (s State) RecordBoundary(plan []Step, progress *Progress) State {
 func (s State) RecordCompaction(debt, repayment float64) State {
 	count := s.RequestCount
 	s.Epoch++
-	s.Plan = slices.Clone(s.Plan)
+	s.Plan = append([]Step{}, s.Plan...)
 	s.LastCompactionRequestCount = &count
 	s.PendingProgress = []Progress{}
 	s.LastContextTokens = nil // do not compare context sizes across the replacement summary

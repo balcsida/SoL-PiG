@@ -44,6 +44,8 @@ func TestParsePlanSteps(t *testing.T) {
 		{"non-string goal", `[{"id":"x","goal":1,"status":"pending"}]`, false},
 		{"oversize goal", `[{"id":"x","goal":"` + big + `","status":"pending"}]`, false},
 		{"limit goal", `[{"id":"x","goal":"` + big[1:] + `","status":"pending"}]`, true},
+		{"multibyte limit", `[{"id":"x","goal":"` + strings.Repeat("é", 8192) + `","status":"pending"}]`, true},
+		{"multibyte oversize", `[{"id":"x","goal":"` + strings.Repeat("é", 8193) + `","status":"pending"}]`, false},
 		{"not an array", `{}`, false},
 		{"non-object item", `["x"]`, false},
 	} {
@@ -137,5 +139,17 @@ func TestFormatPlanSnapshotKeepsKeyOrder(t *testing.T) {
 	}
 	if got := FormatPlanSnapshot(nil); got != `<sol-pi-plan task_status="active">{"steps":[]}</sol-pi-plan>` {
 		t.Fatalf("nil plan: %s", got)
+	}
+}
+
+func TestPlanJSONIsNotHTMLEscaped(t *testing.T) {
+	steps := []Step{{"a&b", "Vec<T> && c", "pending"}}
+	want := `<sol-pi-plan task_status="active">{"steps":[{"id":"a&b","goal":"Vec<T> && c","status":"pending"}]}</sol-pi-plan>`
+	if got := FormatPlanSnapshot(steps); got != want {
+		t.Fatalf("got %s", got)
+	}
+	tr := AnalyzePlanTransition(steps, []Step{{"a&b", "other", "pending"}})
+	if len(tr.Advice) == 0 || tr.Advice[0] != `Plan step "a&b" changed goal; reuse an id only for the same goal.` {
+		t.Fatalf("got %q", tr.Advice)
 	}
 }

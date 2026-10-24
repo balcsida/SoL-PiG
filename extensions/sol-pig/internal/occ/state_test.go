@@ -213,9 +213,32 @@ func TestRecordCorrectionDropsStaleHistory(t *testing.T) {
 }
 
 func TestTransitionsDoNotAliasTheReceiver(t *testing.T) {
-	a := InitialState().RecordProviderRequest(1).RecordBoundary(testPlan, &testProgress)
+	a := InitialState().RecordProviderRequest(1).RecordBoundary(testPlan, &testProgress).RecordProviderRequest(2).RecordBoundary(testPlan, &testProgress)
+	a.PendingProgress = append(make([]Progress, 0, 8), a.PendingProgress...)
+	a.CompletedBoundaryRequestCounts = append(make([]int, 0, 8), a.CompletedBoundaryRequestCounts...)
 	b := a.RecordBoundary(testPlan, &testProgress)
-	if len(a.PendingProgress) != 1 || len(a.CompletedBoundaryRequestCounts) != 1 || len(b.PendingProgress) != 2 {
-		t.Fatalf("a=%+v b=%+v", a, b)
+	c := a.RecordBoundary(testPlan, nil)
+	if len(b.PendingProgress) != 3 || len(c.PendingProgress) != 2 || len(b.CompletedBoundaryRequestCounts) != 3 ||
+		c.CompletedBoundaryRequestCounts[2] != 0 {
+		t.Fatalf("b=%+v c=%+v", b, c)
+	}
+	if reflect.ValueOf(b.CompletedBoundaryRequestCounts).Pointer() == reflect.ValueOf(c.CompletedBoundaryRequestCounts).Pointer() {
+		t.Fatal("counts share a backing array")
+	}
+	if reflect.ValueOf(b.PendingProgress).Pointer() == reflect.ValueOf(a.PendingProgress).Pointer() {
+		t.Fatal("progress shares a backing array")
+	}
+}
+
+func TestRecordedNilInputsStillRoundTrip(t *testing.T) {
+	nilPlan := InitialState()
+	nilPlan.Plan = nil
+	for name, s := range map[string]State{
+		"boundary":   InitialState().RecordBoundary(nil, &Progress{StepID: "a"}),
+		"compaction": nilPlan.RecordCompaction(0, 0),
+	} {
+		if _, ok := ParseState(asData(t, s)); !ok {
+			t.Errorf("%s: ParseState rejected %+v", name, s)
+		}
 	}
 }
