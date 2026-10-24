@@ -48,7 +48,6 @@ func TestValidateReceiptReasons(t *testing.T) {
 		{"13 items", receipt("failure", false, items(13)), true, "schema-mismatch"},
 		{"bad kind", receipt("failure", false, []any{item("note", "error: boom")}), true, "unverifiable-quote"},
 		{"empty quote", receipt("failure", false, []any{item("fatal", "")}), true, "unverifiable-quote"},
-		{"601-char quote", receipt("failure", false, []any{item("fatal", strings.Repeat("a", 601))}), true, "unverifiable-quote"},
 		{"quote not in body", receipt("failure", false, []any{item("fatal", "absent")}), true, "unverifiable-quote"},
 		{"non-object item", receipt("failure", false, []any{"error: boom"}), true, "unverifiable-quote"},
 		{"no failure evidence", receipt("failure", false, []any{item("warning", "first line")}), true, "missing-failure-evidence"},
@@ -136,5 +135,56 @@ func TestJSQuote(t *testing.T) {
 		if got := jsQuote(in); got != want {
 			t.Errorf("jsQuote(%q) = %s, want %s", in, got, want)
 		}
+	}
+}
+
+func TestValidateReceiptQuoteLengthAndShape(t *testing.T) {
+	build := func(a Archive, status string, evidence any) string {
+		raw, _ := json.Marshal(map[string]any{"schema": ReceiptSchema, "source_sha256": a.Hash, "status": status, "uncertain": false, "evidence": evidence})
+		return string(raw)
+	}
+	quoteOf := func(q string) []any { return []any{map[string]any{"kind": "summary", "quote": q}} }
+
+	// The body contains every quote, so only the length rule can reject it.
+	for _, c := range []struct {
+		name, quote, reason string
+	}{
+		{"601 ASCII", strings.Repeat("a", 601), "unverifiable-quote"},
+		{"600 ASCII", strings.Repeat("a", 600), ""},
+		{"301 emoji (602 units)", strings.Repeat("😀", 301), "unverifiable-quote"},
+		{"300 emoji (600 units)", strings.Repeat("😀", 300), ""},
+	} {
+		body := c.quote + "\ntail"
+		a := Archive{Hash: SHA256Hex(body)}
+		if _, reason := ValidateReceipt(build(a, "success", quoteOf(c.quote)), a, body, false); reason != c.reason {
+			t.Errorf("%s: reason = %q, want %q", c.name, reason, c.reason)
+		}
+	}
+
+	body := "x\nrepeat\ny\nrepeat\n"
+	a := Archive{Hash: SHA256Hex(body)}
+	if v, reason := ValidateReceipt(build(a, "success", quoteOf("repeat")), a, body, false); reason != "" || v.Evidence[0].Line != 2 {
+		t.Errorf("first occurrence: %+v, %q", v, reason)
+	}
+	if _, reason := ValidateReceipt(build(a, "failure", []any{}), a, body, false); reason != "schema-mismatch" {
+		t.Errorf("failure status without is_error: %q", reason)
+	}
+	if _, reason := ValidateReceipt(build(a, "success", nil), a, body, false); reason != "schema-mismatch" {
+		t.Errorf("evidence null: %q", reason)
+	}
+	if _, reason := ValidateReceipt("null", a, body, false); reason != "schema-mismatch" {
+		t.Errorf("JSON null: %q", reason)
+	}
+
+	var lines []string
+	var twelve []any
+	for i := 0; i < 12; i++ {
+		lines = append(lines, fmt.Sprintf("entry%02d", i))
+		twelve = append(twelve, map[string]any{"kind": "summary", "quote": lines[i]})
+	}
+	body = strings.Join(lines, "\n")
+	a = Archive{Hash: SHA256Hex(body)}
+	if v, reason := ValidateReceipt(build(a, "success", twelve), a, body, false); reason != "" || len(v.Evidence) != 12 {
+		t.Errorf("12 items: %d, %q", len(v.Evidence), reason)
 	}
 }
