@@ -74,11 +74,13 @@ echo "3. idle footprint: $((TOTAL_KB / 1024)) MiB across $PROCS processes (pig +
 
 # 4. ObservationPack end to end against a scripted endpoint: full, full, placeholder, recall.
 MOCK_LOG="$WORK/mock-log"
-( cd "$ROOT/scripts/live/mockprovider" && exec go run . -addr 127.0.0.1:0 -log-dir "$MOCK_LOG" -scenario observation-pack ) \
-  > "$WORK/mock.stdout" 2> "$WORK/mock.stderr" &
+rm -rf "$MOCK_LOG" # a reused work directory must not hand pig a stale addr or an appended log
+( cd "$ROOT/scripts/live/mockprovider" && go build -o "$WORK/mockprovider" . ) || fail "the scripted endpoint does not build"
+# Run the built binary, not `go run`: a plain kill of `go run` leaves its child serving.
+"$WORK/mockprovider" -addr 127.0.0.1:0 -log-dir "$MOCK_LOG" -scenario observation-pack > "$WORK/mock.stdout" 2> "$WORK/mock.stderr" &
 MOCK_PID=$!
 trap 'kill $MOCK_PID 2>/dev/null || true' EXIT
-for _ in $(seq 1 120); do [ -s "$MOCK_LOG/addr" ] && break; sleep 0.5; done
+for _ in $(seq 1 60); do [ -s "$MOCK_LOG/addr" ] && break; sleep 0.5; done
 [ -s "$MOCK_LOG/addr" ] || fail "the scripted endpoint did not start (see $WORK/mock.stderr)"
 ADDR=$(cat "$MOCK_LOG/addr")
 cat > "$PIG_CODING_AGENT_DIR/models.json" <<JSON
@@ -109,7 +111,6 @@ FIRST=$(sed -n 1p "$LEDGER")
 OBJECT="$(dirname "$LEDGER")/objects/$(sed -E 's/.*"id":"(obs_[a-f0-9]{24})".*/\1/' <<<"$FIRST").txt"
 ORIG=$(sed -E 's/.*"originalBytes":([0-9]+).*/\1/' <<<"$FIRST")
 [ "$(wc -c < "$OBJECT" | tr -d ' ')" -eq "$ORIG" ] || fail "archived object $OBJECT does not hold the $ORIG original bytes"
-kill "$MOCK_PID" 2>/dev/null; wait "$MOCK_PID" 2>/dev/null || true
 echo "4. scripted endpoint: placeholder on the third send, obs_recall returned the bytes"
 
 echo "verify.sh: ok"

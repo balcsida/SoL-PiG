@@ -19,6 +19,9 @@ jobs:
       - name: Unit and fake-host tests
         working-directory: extensions/sol-pig
         run: go vet ./... && go test ./...
+      - name: Scripted endpoint tests
+        working-directory: scripts/live/mockprovider
+        run: go vet ./... && go test ./...
       - uses: actions/setup-node@v4
         with:
           node-version: 22
