@@ -30,6 +30,9 @@ type Options struct {
 	SessionID      string
 	Settings       map[string]any // answer to GetSettings; nil means the host sent none
 	ActiveTools    []string
+
+	ShellPath, ShellCommandPrefix *string  // answers for the SettingsManager; nil → JSON null
+	SettingsErrors                []string // drainErrors returns one global-scope error per entry
 }
 
 // Call is one recorded extension→host call.
@@ -447,8 +450,22 @@ func (h *Host) reply(method string, raw json.RawMessage, args map[string]any) (a
 		handle := fmt.Sprintf("h%d-%v", h.handles, args["kind"])
 		h.mu.Unlock()
 		return map[string]any{"handle": handle}, nil
+	case "builtinTool.definition":
+		return h.builtinDefinition(args)
+	case "builtinTool.execute":
+		return h.builtinExecute(args)
 	case "sessionRead", "sessionGraph.call":
 		switch m, _ := args["method"].(string); m {
+		case "getShellPath":
+			return h.opts.ShellPath, nil
+		case "getShellCommandPrefix":
+			return h.opts.ShellCommandPrefix, nil
+		case "drainErrors":
+			errs := []any{}
+			for _, message := range h.opts.SettingsErrors {
+				errs = append(errs, map[string]any{"scope": "global", "path": nil, "error": message})
+			}
+			return errs, nil
 		case "getSessionDir":
 			return h.opts.SessionDir, nil
 		case "getSessionId", "getSessionID":

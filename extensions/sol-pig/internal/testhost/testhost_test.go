@@ -4,6 +4,9 @@
 package testhost
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	sdk "github.com/MichaelKinsy/PiG/extensions/sdk"
@@ -53,4 +56,174 @@ func TestHostRecordsLateRegistration(t *testing.T) {
 	if len(h.Handlers("tool_result")) != 1 || len(h.Tools()) != 1 || h.Tools()[0].Name != "late" {
 		t.Fatalf("late registration not recorded: %v %v", h.Handlers("tool_result"), h.Tools())
 	}
+}
+
+func probeHost(t *testing.T, opts Options, body func(ctx sdk.Context)) *Host {
+	t.Helper()
+	ext := sdk.New("probe")
+	ext.Tool("probe", "probe", sdk.Schema{"type": "object"}, func(ctx sdk.Context, p map[string]any) (any, error) {
+		body(ctx)
+		return "ok", nil
+	})
+	opts.Cwd, opts.SessionDir, opts.SessionID = t.TempDir(), t.TempDir(), "s1"
+	h := Start(t, ext, opts)
+	if res := h.CallTool("probe", "c1", map[string]any{}); res.Err != nil {
+		t.Fatalf("probe: %v", res.Err)
+	}
+	return h
+}
+
+func firstText(t *testing.T, res sdk.AgentToolResult) string {
+	t.Helper()
+	if len(res.Content) == 0 {
+		t.Fatalf("result has no content: %+v", res)
+	}
+	return res.Content[0].Text
+}
+
+func TestBuiltinWriteAndBashThroughTheHost(t *testing.T) {
+	cwd := ""
+	h := probeHost(t, Options{}, func(ctx sdk.Context) {
+		cwd = ctx.Cwd()
+		write, err := sdk.CreateWriteToolDefinition(cwd, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		res, err := write.Execute(ctx, map[string]any{"path": "out.txt", "content": "hi\n"})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if got := firstText(t, res.(sdk.AgentToolResult)); got != "Successfully wrote to out.txt" {
+			t.Errorf("write text = %q", got)
+		}
+		bash, err := sdk.CreateBashToolDefinition(cwd, &sdk.BashToolOptions{CommandPrefix: "export CI=1"})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		res, err = bash.Execute(ctx, map[string]any{"command": "printf native-$CI"})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if got := firstText(t, res.(sdk.AgentToolResult)); got != "native-1" {
+			t.Errorf("bash text = %q", got)
+		}
+		res, err = bash.Execute(ctx, map[string]any{"command": "exit 7"})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		failed := res.(sdk.AgentToolResult)
+		if got := firstText(t, failed); !strings.HasSuffix(got, "Command exited with code 7") || !failed.IsError {
+			t.Errorf("failing bash = %q isError=%v", got, failed.IsError)
+		}
+	})
+	if data, err := os.ReadFile(filepath.Join(cwd, "out.txt")); err != nil || string(data) != "hi\n" {
+		t.Errorf("out.txt = %q, %v", data, err)
+	}
+	calls := h.BuiltinCalls()
+	if len(calls) != 3 || calls[1].Name != "bash" || calls[1].Options["commandPrefix"] != "export CI=1" {
+		t.Errorf("BuiltinCalls = %+v", calls)
+	}
+}
+
+func TestBuiltinEditThroughTheHost(t *testing.T) {
+	probeHost(t, Options{}, func(ctx sdk.Context) {
+		path := filepath.Join(ctx.Cwd(), "f.txt")
+		if err := os.WriteFile(path, []byte("alpha beta"), 0o644); err != nil {
+			t.Error(err)
+			return
+		}
+		edit, err := sdk.CreateEditToolDefinition(ctx.Cwd(), nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		edits := func(old, new string) map[string]any {
+			return map[string]any{"path": "f.txt", "edits": []any{map[string]any{"oldText": old, "newText": new}}}
+		}
+		res, err := edit.Execute(ctx, edits("beta", "gamma"))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if got := firstText(t, res.(sdk.AgentToolResult)); got != "Successfully replaced 1 block(s) in f.txt." {
+			t.Errorf("edit text = %q", got)
+		}
+		if data, _ := os.ReadFile(path); string(data) != "alpha gamma" {
+			t.Errorf("f.txt = %q", data)
+		}
+		res, err = edit.Execute(ctx, edits("zeta", "x"))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		miss := res.(sdk.AgentToolResult)
+		if !miss.IsError || !strings.Contains(firstText(t, miss), "Could not edit file") {
+			t.Errorf("missing oldText result = %+v", miss)
+		}
+	})
+}
+
+func TestBuiltinDefinitionsCarryPiGTexts(t *testing.T) {
+	probeHost(t, Options{}, func(ctx sdk.Context) {
+		edit, err := sdk.CreateEditToolDefinition(ctx.Cwd(), nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if edit.Description != editDescription || len(edit.PromptGuidelines) != 4 {
+			t.Errorf("edit description/guidelines = %q / %d", edit.Description, len(edit.PromptGuidelines))
+		}
+		if req, _ := edit.Parameters["required"].([]any); len(req) != 2 || req[0] != "path" || req[1] != "edits" {
+			t.Errorf("edit required = %v", edit.Parameters["required"])
+		}
+		write, _ := sdk.CreateWriteToolDefinition(ctx.Cwd(), nil)
+		if !strings.HasPrefix(write.Description, "Write content to a file. Creates the file if it doesn't exist") {
+			t.Errorf("write description = %q", write.Description)
+		}
+		bash, _ := sdk.CreateBashToolDefinition(ctx.Cwd(), nil)
+		props, _ := bash.Parameters["properties"].(map[string]any)
+		if props["command"] == nil || props["timeout"] == nil {
+			t.Errorf("bash properties = %v", props)
+		}
+	})
+}
+
+func TestSettingsManagerShellOptions(t *testing.T) {
+	ptr := func(s string) *string { return &s }
+	probeHost(t, Options{ShellPath: ptr("/bin/zsh"), ShellCommandPrefix: ptr("export CI=1")}, func(ctx sdk.Context) {
+		agentDir := t.TempDir()
+		sm, err := sdk.SettingsManagerCreate(ctx, ctx.Cwd(), &agentDir, &sdk.SettingsManagerCreateOptions{ProjectTrusted: sdk.Bool(true)})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if p, err := sm.GetShellPath(); err != nil || p == nil || *p != "/bin/zsh" {
+			t.Errorf("GetShellPath = %v, %v", p, err)
+		}
+		if p, err := sm.GetShellCommandPrefix(); err != nil || p == nil || *p != "export CI=1" {
+			t.Errorf("GetShellCommandPrefix = %v, %v", p, err)
+		}
+		if errs, err := sm.DrainErrors(); err != nil || len(errs) != 0 {
+			t.Errorf("DrainErrors = %v, %v", errs, err)
+		}
+	})
+	probeHost(t, Options{SettingsErrors: []string{"settings.json: bad"}}, func(ctx sdk.Context) {
+		sm, err := sdk.SettingsManagerCreate(ctx, ctx.Cwd(), nil, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		errs, err := sm.DrainErrors()
+		if err != nil || len(errs) != 1 || errs[0].Error.Error() != "settings.json: bad" {
+			t.Errorf("DrainErrors = %v, %v", errs, err)
+		}
+		if p, _ := sm.GetShellPath(); p != nil {
+			t.Errorf("GetShellPath = %v, want nil", *p)
+		}
+	})
 }
