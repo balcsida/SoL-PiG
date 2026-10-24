@@ -37,6 +37,13 @@ func fusedEvent(tool string, blocks ...string) map[string]any {
 	}
 }
 
+func writeFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func boolPtr(b bool) *bool { return &b }
 
 func equalBool(a, b *bool) bool {
@@ -101,6 +108,22 @@ func TestFusedCandidate(t *testing.T) {
 		t.Fatalf("first marker wins: %+v", got)
 	}
 
+	got, ok = ReducibleToolResult(fusedEvent("write", "w", "[then_run:succeeded]\n\nout\nCommand exited with code 3"))
+	if !ok || !equalBool(got.ExitFailed, boolPtr(true)) {
+		t.Fatalf("succeeded marker with failing trailer: %+v", got)
+	}
+
+	got, ok = ReducibleToolResult(fusedEvent("write", "[then_run:failed]\nx [then_run:succeeded] y"))
+	if !ok || got.Body != "x [then_run:succeeded] y" || !equalBool(got.ExitFailed, boolPtr(true)) {
+		t.Fatalf("failed before succeeded: %+v", got)
+	}
+
+	emptyCommand := fusedEvent("write", "[then_run:succeeded]\nx")
+	emptyCommand["input"] = map[string]any{"then_run": map[string]any{"command": ""}}
+	if _, ok := ReducibleToolResult(emptyCommand); ok {
+		t.Fatal("empty then_run.command should not be reducible")
+	}
+
 	noThenRun := fusedEvent("write", "[then_run:succeeded]\nx")
 	noThenRun["input"] = map[string]any{"path": "f"}
 	if _, ok := ReducibleToolResult(noThenRun); ok {
@@ -138,7 +161,7 @@ func TestExactBodyFromTempLog(t *testing.T) {
 
 	other := t.TempDir()
 	outside := filepath.Join(other, "pi-bash-abc.log")
-	os.WriteFile(outside, []byte("outside"), 0o600)
+	writeFile(t, outside, []byte("outside"))
 	if got := body(bashEvent("tail", map[string]any{"details": map[string]any{"fullOutputPath": outside}})); got != "tail" {
 		t.Fatalf("outside dir: %q", got)
 	}
@@ -151,14 +174,23 @@ func TestExactBodyFromTempLog(t *testing.T) {
 		t.Fatalf("symlink: %q", got)
 	}
 
+	// A symlink inside the temp dir to a regular log in the same dir: only the Lstat check rejects it.
+	sameDir := filepath.Join(tmp, "pi-bash-link2.log")
+	if err := os.Symlink(logPath, sameDir); err != nil {
+		t.Fatal(err)
+	}
+	if got := body(bashEvent("tail", map[string]any{"details": map[string]any{"fullOutputPath": sameDir}})); got != "tail" {
+		t.Fatalf("same-dir symlink: %q", got)
+	}
+
 	badName := filepath.Join(tmp, "other.log")
-	os.WriteFile(badName, []byte("x"), 0o600)
+	writeFile(t, badName, []byte("x"))
 	if got := body(bashEvent("tail", map[string]any{"details": map[string]any{"fullOutputPath": badName}})); got != "tail" {
 		t.Fatalf("bad name: %q", got)
 	}
 
 	invalid := filepath.Join(tmp, "pi-bash-bad.log")
-	os.WriteFile(invalid, []byte("a\xffb"), 0o600)
+	writeFile(t, invalid, []byte("a\xffb"))
 	if got := body(bashEvent("tail", map[string]any{"details": map[string]any{"fullOutputPath": invalid}})); got != "a\uFFFDb" {
 		t.Fatalf("invalid utf-8: %q", got)
 	}
