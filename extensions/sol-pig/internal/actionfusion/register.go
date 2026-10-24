@@ -164,6 +164,7 @@ func Register(ext *sdk.Extension, ctx sdk.Context, shell ShellOptions) error {
 		return err
 	}
 	edit.Execute = f.execute(func(b builtins) sdk.BuiltinToolDefinition { return b.edit })
+	edit.PrepareArguments = PrepareEditArguments // the SDK's built-in definition does not carry the built-in's own
 	write, err := withThenRun(b.write, writeThenRunDescription)
 	if err != nil {
 		return err
