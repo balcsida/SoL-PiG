@@ -72,20 +72,26 @@ wait "$PIG_PID" 2>/dev/null || true
 [ "$PROCS" -ge 2 ] || fail "expected pig and its extension runner, saw $PROCS process(es)"
 echo "3. idle footprint: $((TOTAL_KB / 1024)) MiB across $PROCS processes (pig + extension runner)"
 
-# 4. ObservationPack end to end against a scripted endpoint: full, full, placeholder, recall.
-MOCK_LOG="$WORK/mock-log"
-rm -rf "$MOCK_LOG" # a reused work directory must not hand pig a stale addr or an appended log
-( cd "$ROOT/scripts/live/mockprovider" && go build -o "$WORK/mockprovider" . ) || fail "the scripted endpoint does not build"
-# Run the built binary, not `go run`: a plain kill of `go run` leaves its child serving.
-"$WORK/mockprovider" -addr 127.0.0.1:0 -log-dir "$MOCK_LOG" -scenario observation-pack > "$WORK/mock.stdout" 2> "$WORK/mock.stderr" &
-MOCK_PID=$!
-trap 'kill $MOCK_PID 2>/dev/null || true' EXIT
-for _ in $(seq 1 60); do [ -s "$MOCK_LOG/addr" ] && break; sleep 0.5; done
-[ -s "$MOCK_LOG/addr" ] || fail "the scripted endpoint did not start (see $WORK/mock.stderr)"
-ADDR=$(cat "$MOCK_LOG/addr")
-cat > "$PIG_CODING_AGENT_DIR/models.json" <<JSON
+# start_endpoint <scenario> <log-dir>: serve the scenario, point models.json at it.
+start_endpoint() {
+  MOCK_LOG="$2"
+  rm -rf "$MOCK_LOG" # a reused work directory must not hand pig a stale addr or an appended log
+  # Run the built binary, not `go run`: a plain kill of `go run` leaves its child serving.
+  "$WORK/mockprovider" -addr 127.0.0.1:0 -log-dir "$MOCK_LOG" -scenario "$1" > "$WORK/mock.stdout" 2> "$WORK/mock.stderr" &
+  MOCK_PID=$!
+  for _ in $(seq 1 60); do [ -s "$MOCK_LOG/addr" ] && break; sleep 0.5; done
+  [ -s "$MOCK_LOG/addr" ] || fail "the scripted endpoint did not start (see $WORK/mock.stderr)"
+  ADDR=$(cat "$MOCK_LOG/addr")
+  cat > "$PIG_CODING_AGENT_DIR/models.json" <<JSON
 {"providers":{"mock":{"baseUrl":"http://$ADDR/v1","api":"openai-completions","apiKey":"mock","models":[{"id":"mock-1","name":"Mock","contextWindow":128000,"maxTokens":4096}]}}}
 JSON
+}
+stop_endpoint() { kill "$MOCK_PID" 2>/dev/null || true; wait "$MOCK_PID" 2>/dev/null || true; }
+trap 'kill ${MOCK_PID:-} 2>/dev/null || true' EXIT
+
+# 4. ObservationPack end to end against a scripted endpoint: full, full, placeholder, recall.
+( cd "$ROOT/scripts/live/mockprovider" && go build -o "$WORK/mockprovider" . ) || fail "the scripted endpoint does not build"
+start_endpoint observation-pack "$WORK/mock-log"
 cd "$HOME/cwd"
 pig --offline --no-session --model mock/mock-1 --mode json -p 'Run the scripted scenario.' > "$WORK/scenario.jsonl" 2> "$WORK/scenario.stderr" \
   || fail "scripted session exited $? (see $WORK/scenario.stderr)"
@@ -112,5 +118,39 @@ OBJECT="$(dirname "$LEDGER")/objects/$(sed -E 's/.*"id":"(obs_[a-f0-9]{24})".*/\
 ORIG=$(sed -E 's/.*"originalBytes":([0-9]+).*/\1/' <<<"$FIRST")
 [ "$(wc -c < "$OBJECT" | tr -d ' ')" -eq "$ORIG" ] || fail "archived object $OBJECT does not hold the $ORIG original bytes"
 echo "4. scripted endpoint: placeholder on the third send, obs_recall returned the bytes"
+
+stop_endpoint
+
+# 5. Action Fusion end to end: then_run inside write and edit, plus built-in parity with it off and on.
+printf '{"version":1,"actionFusion":true}\n' > "$PIG_CODING_AGENT_DIR/sol-pi.json"
+start_endpoint action-fusion "$WORK/mock-log-af"
+cd "$HOME/cwd"
+pig --offline --no-session --model mock/mock-1 --mode json -p 'Run the scripted scenario.' > "$WORK/fusion.jsonl" 2> "$WORK/fusion.stderr" \
+  || fail "action fusion session exited $? (see $WORK/fusion.stderr)"
+grep -q 'All done\.' "$WORK/fusion.jsonl" || fail "the action fusion session did not reach its final answer (see $WORK/fusion.jsonl)"
+stop_endpoint
+AF="$WORK/mock-log-af"
+contains() { local file=$1; shift; for needle in "$@"; do grep -qF -- "$needle" "$file" || fail "$file lacks: $needle"; done; }
+contains "$AF/request-001-agent.json" '"then_run"'
+contains "$AF/request-002-agent.json" 'Successfully wrote to report.txt' '[then_run:succeeded]' 'hello from the fused write'
+contains "$AF/request-003-agent.json" 'Successfully replaced 1 block(s) in report.txt.' '[then_run:failed]' 'Command exited with code 7'
+[ "$(cat "$HOME/cwd/report.txt")" = "bye from the fused write" ] || fail "report.txt reads: $(cat "$HOME/cwd/report.txt")"
+
+# Parity: the fake provider drives the built-in write and edit; the files must not depend on the flag.
+parity_run() { # <label> <config> <prompt> <seed-file or empty>
+  local dir="$WORK/parity-$1"
+  rm -rf "$dir"; mkdir -p "$dir"
+  printf '%s\n' "$2" > "$PIG_CODING_AGENT_DIR/sol-pi.json"
+  [ -z "$4" ] || printf 'REPLACE_ME\n' > "$dir/$4"
+  ( cd "$dir" && pig --offline --no-session --model test-faux/faux-1 -p "$3" > "$dir.out" 2>&1 ) || fail "parity run $1 exited $? (see $dir.out)"
+}
+for spec in "write|Run: write parity-write-output.txt|parity-write-output.txt|" "edit|Run: edit parity-edit-target.txt|parity-edit-target.txt|parity-edit-target.txt"; do
+  IFS='|' read -r name prompt file seed <<<"$spec"
+  parity_run "$name-off" '{"version":1}' "$prompt" "$seed"
+  parity_run "$name-on" '{"version":1,"actionFusion":true}' "$prompt" "$seed"
+  [ -f "$WORK/parity-$name-off/$file" ] || fail "parity $name: the built-in produced no $file (see $WORK/parity-$name-off.out)"
+  cmp -s "$WORK/parity-$name-off/$file" "$WORK/parity-$name-on/$file" || fail "parity $name: $file differs with Action Fusion on"
+done
+echo "5. action fusion: then_run ran inside write and edit; built-in parity unchanged"
 
 echo "verify.sh: ok"

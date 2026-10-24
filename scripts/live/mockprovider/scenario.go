@@ -40,4 +40,10 @@ var scenarios = map[string][]step{
 		recallObservation,
 		textReply("All done."),
 	},
+	// ActionFusion: write then edit, each with a then_run command; the edit's command fails.
+	"action-fusion": {
+		toolCall("write", map[string]any{"path": "report.txt", "content": "hello from the fused write\n", "then_run": map[string]any{"command": "cat report.txt"}}),
+		toolCall("edit", map[string]any{"path": "report.txt", "edits": []map[string]any{{"oldText": "hello", "newText": "bye"}}, "then_run": map[string]any{"command": "exit 7"}}),
+		textReply("All done."),
+	},
 }

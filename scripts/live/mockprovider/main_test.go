@@ -68,6 +68,24 @@ func TestScenarioProgressionAndDynamicRecall(t *testing.T) {
 	}
 }
 
+func TestActionFusionScenarioSteps(t *testing.T) {
+	s := &server{scenario: scenarios["action-fusion"]}
+	got := s.nextStep("{}")
+	if got.kind != "tool" || got.name != "write" || got.args["path"] != "report.txt" || got.args["content"] != "hello from the fused write\n" ||
+		!reflect.DeepEqual(got.args["then_run"], map[string]any{"command": "cat report.txt"}) {
+		t.Fatalf("step 1 = %+v", got)
+	}
+	got = s.nextStep("{}")
+	wantEdits := []map[string]any{{"oldText": "hello", "newText": "bye"}}
+	if got.kind != "tool" || got.name != "edit" || got.args["path"] != "report.txt" || !reflect.DeepEqual(got.args["edits"], wantEdits) ||
+		!reflect.DeepEqual(got.args["then_run"], map[string]any{"command": "exit 7"}) {
+		t.Fatalf("step 2 = %+v", got)
+	}
+	if got := s.nextStep("{}"); got.kind != "text" || got.text != "All done." {
+		t.Fatalf("step 3 = %+v", got)
+	}
+}
+
 func post(t *testing.T, url, body string) (*http.Response, []string) {
 	t.Helper()
 	resp, err := http.Post(url+"/v1/chat/completions", "application/json", strings.NewReader(body))
