@@ -12,7 +12,8 @@
 # plays a scripted scenario through a local OpenAI-compatible endpoint
 # (scripts/live/mockprovider) that proves the placeholder and obs_recall, then a scripted Action Fusion scenario
 # (then_run inside write and edit), a fake-provider parity check of the built-in tools with it off and on,
-# and the reducer scenario (a failing `make check` becomes a verified receipt through the scripted model).
+# the reducer scenario (a failing `make check` becomes a verified receipt through the scripted model),
+# and the occ scenario (a completed plan step triggers native compaction and the task resumes).
 # Everything runs in a throwaway HOME; no credential or network provider is used.
 set -euo pipefail
 
@@ -178,5 +179,36 @@ for object in "$WORK"/tmp/sol-pi-*/evidence-preserving-reducer/objects/*/*; do
 done
 [ "$ARCHIVED" -eq 1 ] || fail "expected one archived full log, saw $ARCHIVED"
 echo "6. reducer: a make failure became a verified receipt through the scripted model"
+
+# 7. Online Context Compact end to end: a completed plan step aborts, compacts natively, and resumes.
+printf '{"version":1,"onlineContextCompact":true,"cacheWriteReadRatio":12.5}\n' > "$PIG_CODING_AGENT_DIR/sol-pi.json"
+# PiG's own threshold compaction would fire first at a 60000-token window and fake a pass.
+printf '{"packages":["%s"],"compaction":{"enabled":false}}\n' "$ROOT" > "$PIG_CODING_AGENT_DIR/settings.json"
+start_endpoint occ "$WORK/mock-log-occ"
+# A 60000-token window makes window protection (five ~10k-token logs) decide the compaction deterministically.
+sed -i.bak 's/"contextWindow":128000/"contextWindow":60000/' "$PIG_CODING_AGENT_DIR/models.json" && rm -f "$PIG_CODING_AGENT_DIR/models.json.bak"
+grep -q '"contextWindow":60000' "$PIG_CODING_AGENT_DIR/models.json" || fail "models.json lacks the 60000-token window"
+cd "$HOME/cwd"
+pig --offline --no-session --model mock/mock-1 --mode json -p 'Run the scripted scenario.' > "$WORK/occ.jsonl" 2> "$WORK/occ.stderr" \
+  || fail "occ session exited $? (see $WORK/occ.stderr)"
+grep -q 'All done\.' "$WORK/occ.jsonl" || fail "the occ session did not reach its final answer (see $WORK/occ.jsonl)"
+stop_endpoint
+OCC="$WORK/mock-log-occ"
+OCC_LOG="$OCC/requests.jsonl"
+SUMMARY_COUNT=$(grep -c '"kind":"summary"' "$OCC_LOG" || true)
+[ "$SUMMARY_COUNT" -eq 1 ] || fail "expected exactly one summary (compaction) request, saw $SUMMARY_COUNT: $(cat "$OCC_LOG")"
+SUMMARY_NO=$(grep '"kind":"summary"' "$OCC_LOG" | sed -E 's/^\{"request":([0-9]+),.*/\1/')
+msgs() { sed -E 's/.*"messages":([0-9]+),.*/\1/' <<<"$1"; }
+BEFORE=$(grep '"kind":"agent"' "$OCC_LOG" | awk -v n="$SUMMARY_NO" -F'[:,]' '$2 < n' | tail -1)
+AFTER=$(grep '"kind":"agent"' "$OCC_LOG" | awk -v n="$SUMMARY_NO" -F'[:,]' '$2 > n' | head -1)
+[ -n "$BEFORE" ] || fail "no agent request before the compaction: $(cat "$OCC_LOG")"
+[ -n "$AFTER" ] || fail "no agent request after the compaction (the resume turn never came): $(cat "$OCC_LOG")"
+grep -q '"toolResults":6,' <<<"$BEFORE" || fail "the compaction did not follow the second update_plan (the request before the summary should carry six tool results): $BEFORE"
+[ "$(msgs "$AFTER")" -lt "$(msgs "$BEFORE")" ] || fail "the first request after the compaction is not shorter: before $BEFORE / after $AFTER"
+AFTER_NO=$(sed -E 's/^\{"request":([0-9]+),.*/\1/' <<<"$AFTER")
+contains "$(printf '%s/request-%03d-summary.json' "$OCC" "$SUMMARY_NO")" 'Preserve completed work, verification results, important decisions, and remaining work.'
+contains "$(printf '%s/request-%03d-agent.json' "$OCC" "$AFTER_NO")" 'Online context compaction finished.'
+! grep -q 'agent_settled' "$WORK/occ.stderr" || fail "agent_settled error in $WORK/occ.stderr: $(grep agent_settled "$WORK/occ.stderr")"
+echo "7. occ: a completed plan step triggered native compaction and the task resumed"
 
 echo "verify.sh: ok"
