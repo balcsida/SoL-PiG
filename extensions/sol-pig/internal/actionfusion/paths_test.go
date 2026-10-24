@@ -47,6 +47,7 @@ func TestResolveToolPath(t *testing.T) {
 		"a/b.txt":               filepath.Join("/work", "a/b.txt"),
 		"/abs/x":                "/abs/x",
 		"file:///tmp/a%20b.txt": "/tmp/a b.txt",
+		"file://localhost/x":    "/x",
 		"@file:///tmp/c.txt":    "/tmp/c.txt",
 		"~/x":                   filepath.Join(home, "x"),
 		"~":                     home,
@@ -57,7 +58,7 @@ func TestResolveToolPath(t *testing.T) {
 			t.Errorf("%q: got %q, %v; want %q", in, got, err, want)
 		}
 	}
-	for _, bad := range []string{"file:///tmp/%zz", "file:///tmp/bad%2Fname.txt"} {
+	for _, bad := range []string{"file:///tmp/%zz", "file:///tmp/bad%2Fname.txt", "file://host/x"} {
 		if got, err := ResolveToolPath("/work", bad); err == nil {
 			t.Errorf("%q: expected error, got %q", bad, got)
 		}

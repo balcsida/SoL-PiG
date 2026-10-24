@@ -2,43 +2,91 @@ package actionfusion
 
 import (
 	"errors"
-	"sync"
 	"testing"
 	"time"
 )
 
-// span runs a 30 ms body on key and reports when it entered and left.
-func span(key string) (enter, exit time.Time) {
-	_ = WithFileQueue(key, func() error {
-		enter = time.Now()
-		time.Sleep(30 * time.Millisecond)
-		exit = time.Now()
-		return nil
-	})
-	return
+const settle = 50 * time.Millisecond
+
+func waitFor(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+	}
 }
 
-func runPair(k1, k2 string) (e1, x1, e2, x2 time.Time) {
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); e1, x1 = span(k1) }()
-	go func() { defer wg.Done(); e2, x2 = span(k2) }()
-	wg.Wait()
-	return
+// waitQueued blocks until n calls are waiting behind the holder of key.
+func waitQueued(t *testing.T, key string, n int) {
+	t.Helper()
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		queueMu.Lock()
+		e := queueEntries[key]
+		got := 0
+		if e != nil {
+			got = len(e.waiters)
+		}
+		queueMu.Unlock()
+		if got == n {
+			return
+		}
+	}
+	t.Fatalf("never reached %d queued waiters", n)
 }
 
 func TestWithFileQueueSerializesSameKey(t *testing.T) {
-	e1, x1, e2, x2 := runPair("k", "k")
-	if e1.Before(x2) && e2.Before(x1) {
-		t.Fatal("same-key bodies overlapped")
+	entered, release, secondEntered := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go WithFileQueue("k", func() error { close(entered); <-release; return nil })
+	waitFor(t, entered, "first body")
+	go WithFileQueue("k", func() error { close(secondEntered); return nil })
+	waitQueued(t, "k", 1)
+	select {
+	case <-secondEntered:
+		t.Fatal("second body entered while the first held the key")
+	case <-time.After(settle):
+	}
+	close(release)
+	waitFor(t, secondEntered, "second body")
+}
+
+func TestWithFileQueueIsFIFO(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	go WithFileQueue("k", func() error { close(entered); <-release; return nil })
+	waitFor(t, entered, "holder")
+	order := make(chan int, 3)
+	done := make(chan struct{}, 3)
+	for i := 0; i < 3; i++ {
+		go WithFileQueue("k", func() error { order <- i; done <- struct{}{}; return nil })
+		waitQueued(t, "k", i+1)
+	}
+	close(release)
+	for i := 0; i < 3; i++ {
+		waitFor(t, done, "waiter")
+		if got := <-order; got != i {
+			t.Fatalf("position %d ran waiter %d", i, got)
+		}
 	}
 }
 
 func TestWithFileQueueDifferentKeysOverlap(t *testing.T) {
-	e1, x1, e2, x2 := runPair("a", "b")
-	if !(e1.Before(x2) && e2.Before(x1)) {
-		t.Fatal("different-key bodies did not overlap")
+	aIn, bIn, done := make(chan struct{}), make(chan struct{}), make(chan struct{}, 2)
+	meet := func(key string, mine, other chan struct{}) {
+		_ = WithFileQueue(key, func() error {
+			close(mine)
+			select {
+			case <-other:
+			case <-time.After(2 * time.Second):
+				t.Error("other key's body never ran concurrently")
+			}
+			return nil
+		})
+		done <- struct{}{}
 	}
+	go meet("a", aIn, bIn)
+	go meet("b", bIn, aIn)
+	waitFor(t, done, "first")
+	waitFor(t, done, "second")
 }
 
 func TestWithFileQueueReleasesAfterError(t *testing.T) {
@@ -48,7 +96,7 @@ func TestWithFileQueueReleasesAfterError(t *testing.T) {
 	}
 	ran := false
 	if err := WithFileQueue("k", func() error { ran = true; return nil }); err != nil || !ran {
-		t.Fatalf("third call: ran=%v err=%v", ran, err)
+		t.Fatalf("second call: ran=%v err=%v", ran, err)
 	}
 	queueMu.Lock()
 	defer queueMu.Unlock()

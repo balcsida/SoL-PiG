@@ -8,9 +8,9 @@ package actionfusion
 
 import "sync"
 
+// queueEntry exists only while its key is held; waiters are woken in arrival order.
 type queueEntry struct {
-	mu      sync.Mutex
-	waiters int
+	waiters []chan struct{}
 }
 
 var (
@@ -18,25 +18,30 @@ var (
 	queueEntries = map[string]*queueEntry{}
 )
 
-// WithFileQueue runs work while holding the per-key lock; keys are released when unused.
+// WithFileQueue runs work once every earlier call on key has finished (FIFO); keys are released when unused.
 func WithFileQueue(key string, work func() error) error {
 	queueMu.Lock()
-	e := queueEntries[key]
-	if e == nil {
-		e = &queueEntry{}
-		queueEntries[key] = e
-	}
-	e.waiters++
-	queueMu.Unlock()
-
-	e.mu.Lock()
-	defer func() {
-		e.mu.Unlock()
-		queueMu.Lock()
-		if e.waiters--; e.waiters == 0 {
-			delete(queueEntries, key)
-		}
+	if e := queueEntries[key]; e != nil {
+		turn := make(chan struct{})
+		e.waiters = append(e.waiters, turn)
 		queueMu.Unlock()
-	}()
+		<-turn // ownership is handed over by the previous holder
+	} else {
+		queueEntries[key] = &queueEntry{}
+		queueMu.Unlock()
+	}
+	defer release(key)
 	return work()
+}
+
+func release(key string) {
+	queueMu.Lock()
+	defer queueMu.Unlock()
+	e := queueEntries[key]
+	if len(e.waiters) == 0 {
+		delete(queueEntries, key)
+		return
+	}
+	close(e.waiters[0])
+	e.waiters = e.waiters[1:]
 }

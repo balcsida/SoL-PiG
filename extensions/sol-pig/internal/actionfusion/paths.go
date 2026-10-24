@@ -78,7 +78,13 @@ func fileURLPath(raw string) (string, error) {
 	}
 	path := u.Path
 	if runtime.GOOS == "windows" {
-		path = filepath.FromSlash(strings.TrimPrefix(path, "/"))
+		if u.Host != "" && u.Host != "localhost" {
+			return `\\` + u.Host + filepath.FromSlash(path), nil
+		}
+		return filepath.FromSlash(strings.TrimPrefix(path, "/")), nil
+	}
+	if u.Host != "" && u.Host != "localhost" {
+		return "", errors.New("file URL host must be localhost or empty")
 	}
 	return path, nil
 }
