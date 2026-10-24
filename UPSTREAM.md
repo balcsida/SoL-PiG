@@ -24,3 +24,6 @@ PiG reference: https://github.com/MichaelKinsy/PiG at tag `v0.5.3`.
 | `extensions/sol-pig/internal/reducer/provider.go` | SoL-Pi `src/sol-pi/extensions/evidence-preserving-reducer/provider.ts` | `2195680` |
 | `extensions/sol-pig/internal/reducer/journal.go` | SoL-Pi `src/sol-pi/extensions/evidence-preserving-reducer/journal.ts` | `2195680` |
 | `extensions/sol-pig/internal/reducer/reducer.go` | SoL-Pi `src/sol-pi/extensions/evidence-preserving-reducer/index.ts` | `2195680` |
+| `extensions/sol-pig/internal/occ/economics.go` | SoL-Pi `src/sol-pi/extensions/online-context-compact/economics.ts` | `2195680` |
+| `extensions/sol-pig/internal/occ/plan.go` | SoL-Pi `src/sol-pi/extensions/online-context-compact/plan.ts` | `2195680` |
+| `extensions/sol-pig/internal/occ/state.go` | SoL-Pi `src/sol-pi/extensions/online-context-compact/state.ts` | `2195680` |
