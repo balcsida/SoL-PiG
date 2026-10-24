@@ -31,6 +31,16 @@ var recallObservation = step{kind: "dynamic", build: func(serialized string) ste
 	return toolCall("obs_recall", map[string]any{"id": id, "offset": 0})
 }}
 
+var occBashStep = toolCall("bash", map[string]any{"command": "yes 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' | head -n 1000"})
+
+func occPlan(collect, report string) []map[string]any {
+	return []map[string]any{
+		{"id": "collect", "goal": "collect build output", "status": collect},
+		{"id": "report", "goal": "write the report", "status": report},
+		{"id": "verify", "goal": "verify the report", "status": "pending"},
+	}
+}
+
 var scenarios = map[string][]step{
 	// ObservationPack: a ~27 KB bash result is sent in full twice, then placeholdered and recalled.
 	"observation-pack": {
@@ -50,6 +60,14 @@ var scenarios = map[string][]step{
 	"reducer": {
 		toolCall("write", map[string]any{"path": "Makefile", "content": "check:\n\t@for i in $$(seq 1 300); do echo \"test_$$i ... ok\"; done; echo \"ERROR test target failed\"; exit 1\n"}),
 		toolCall("bash", map[string]any{"command": "make check"}),
+		textReply("All done."),
+	},
+	// Online Context Compact: a plan, five ~41 KB logs, then a completed step whose boundary compacts; every later request (the resumed turn too) answers.
+	"occ": {
+		toolCall("update_plan", map[string]any{"steps": occPlan("in_progress", "pending")}),
+		occBashStep, occBashStep, occBashStep, occBashStep, occBashStep,
+		toolCall("update_plan", map[string]any{"steps": occPlan("completed", "in_progress"),
+			"progress": map[string]any{"files_changed": []string{}, "verification": []string{"collected five logs"}, "decisions": []string{}}}),
 		textReply("All done."),
 	},
 }

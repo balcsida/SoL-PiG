@@ -61,7 +61,24 @@ func messageText(m map[string]any) string {
 	return ""
 }
 
+// summaryReply is the fixed answer to PiG's native compaction request.
+const summaryReply = "SUMMARY: The scripted agent registered a three-step plan, collected five large build logs and completed the first step. The report and verification steps remain."
+
+// isSummaryRequest matches PiG's compaction prompt: its system prompt, or the instruction that ends the user message.
+func isSummaryRequest(r request) bool {
+	if len(r.Messages) == 0 {
+		return false
+	}
+	if first := r.Messages[0]; first["role"] == "system" && strings.HasPrefix(messageText(first), "You are a context summarization assistant.") {
+		return true
+	}
+	return strings.HasPrefix(messageText(r.Messages[len(r.Messages)-1]), "The messages above are")
+}
+
 func classify(r request) string {
+	if isSummaryRequest(r) {
+		return "summary"
+	}
 	if n := len(r.Messages); n > 0 && strings.Contains(messageText(r.Messages[n-1]), "<untrusted_log>") {
 		return "reducer"
 	}
@@ -161,6 +178,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		action = s.nextStep(string(body))
 	case "reducer":
 		action = textReply(reducerReceipt(messageText(r.Messages[len(r.Messages)-1])))
+	case "summary":
+		action = textReply(summaryReply)
 	default:
 		action = textReply("Scripted session")
 	}

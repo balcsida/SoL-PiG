@@ -248,3 +248,74 @@ func TestReducerRequestDoesNotAdvanceScenario(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestClassifySummaryRequest(t *testing.T) {
+	system := map[string]any{"role": "system", "content": "You are a context summarization assistant. Your task is to read a conversation."}
+	user := map[string]any{"role": "user", "content": parts("<conversation>\n[User]: go\n</conversation>\n\nThe messages above are a conversation to summarize.")}
+	if got := classify(request{Messages: []map[string]any{system, user}}); got != "summary" {
+		t.Fatalf("system prefix classified as %q", got)
+	}
+	last := map[string]any{"role": "user", "content": parts("The messages above are a conversation to summarize. Create a checkpoint.")}
+	if got := classify(request{Tools: []any{map[string]any{}}, Messages: []map[string]any{{"role": "system", "content": "Be helpful."}, last}}); got != "summary" {
+		t.Fatalf("last-user prefix classified as %q", got)
+	}
+	ordinary := request{Tools: []any{map[string]any{}}, Messages: []map[string]any{{"role": "system", "content": "You are an expert coding assistant."}, {"role": "user", "content": parts("Run the scripted scenario.")}}}
+	if got := classify(ordinary); got != "agent" {
+		t.Fatalf("ordinary agent request classified as %q", got)
+	}
+}
+
+func TestOccScenarioSteps(t *testing.T) {
+	s := &server{scenario: scenarios["occ"]}
+	plan := func(steps ...[3]string) []map[string]any {
+		var out []map[string]any
+		for _, st := range steps {
+			out = append(out, map[string]any{"id": st[0], "goal": st[1], "status": st[2]})
+		}
+		return out
+	}
+	got := s.nextStep("{}")
+	wantFirst := plan([3]string{"collect", "collect build output", "in_progress"}, [3]string{"report", "write the report", "pending"}, [3]string{"verify", "verify the report", "pending"})
+	if got.kind != "tool" || got.name != "update_plan" || !reflect.DeepEqual(got.args, map[string]any{"steps": wantFirst}) {
+		t.Fatalf("step 1 = %+v", got)
+	}
+	for i := 2; i <= 6; i++ {
+		got = s.nextStep("{}")
+		if got.kind != "tool" || got.name != "bash" || got.args["command"] != "yes 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' | head -n 1000" {
+			t.Fatalf("step %d = %+v", i, got)
+		}
+	}
+	got = s.nextStep("{}")
+	wantSecond := map[string]any{
+		"steps":    plan([3]string{"collect", "collect build output", "completed"}, [3]string{"report", "write the report", "in_progress"}, [3]string{"verify", "verify the report", "pending"}),
+		"progress": map[string]any{"files_changed": []string{}, "verification": []string{"collected five logs"}, "decisions": []string{}},
+	}
+	if got.kind != "tool" || got.name != "update_plan" || !reflect.DeepEqual(got.args, wantSecond) {
+		t.Fatalf("step 7 = %+v", got)
+	}
+	for i := range 3 {
+		if got := s.nextStep("{}"); got.kind != "text" || got.text != "All done." {
+			t.Fatalf("call %d past the end = %+v", i, got)
+		}
+	}
+}
+
+func TestSummaryRequestDoesNotAdvanceScenario(t *testing.T) {
+	dir := t.TempDir()
+	ts := httptest.NewServer(&server{scenario: scenarios["occ"], logDir: dir})
+	defer ts.Close()
+	body, _ := json.Marshal(map[string]any{"model": "mock-1", "stream": true, "messages": []any{
+		map[string]any{"role": "system", "content": "You are a context summarization assistant. Do NOT continue."},
+		map[string]any{"role": "user", "content": "<conversation>\n</conversation>\n\nThe messages above are a conversation to summarize."}}})
+	_, lines := post(t, ts.URL, string(body))
+	if c := choice(chunk(t, lines[0]))["delta"].(map[string]any)["content"].(string); !strings.HasPrefix(c, "SUMMARY: ") {
+		t.Fatalf("summary reply = %q", c)
+	}
+	_, lines = post(t, ts.URL, `{"model":"mock-1","stream":true,"messages":[],"tools":[{}]}`)
+	if fn := choice(chunk(t, lines[0]))["delta"].(map[string]any)["tool_calls"].([]any)[0].(map[string]any)["function"].(map[string]any); fn["name"] != "update_plan" {
+		t.Fatalf("first agent request after a summary request got %v", fn)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "request-001-summary.json")); err != nil {
+		t.Fatal(err)
+	}
+}
