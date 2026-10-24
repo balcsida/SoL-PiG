@@ -84,8 +84,8 @@ func TestShow(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 	status = h.Calls("ui.setStatus")
-	if len(status) != 2 || status[1].Args["key"] != StatusKey || status[1].Args["text"] != "" {
-		t.Fatalf("setStatus after the delay = %+v", status)
+	if _, hasText := status[len(status)-1].Args["text"]; len(status) != 2 || status[1].Args["key"] != StatusKey || hasText {
+		t.Fatalf("after the delay the status must be removed (setStatus with the key only), got %+v", status)
 	}
 }
 

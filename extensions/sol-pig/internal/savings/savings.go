@@ -86,7 +86,7 @@ func Show(ctx sdk.Context, m Mechanism, saving string) {
 		current := statusGen == gen
 		statusMu.Unlock()
 		if current {
-			ctx.SetStatus(StatusKey, "")
+			ctx.ClearStatus(StatusKey) // Pi's setStatus(key, undefined): remove the entry
 		}
 	})
 }
