@@ -155,4 +155,27 @@ for spec in "write|Run: write parity-write-output.txt|parity-write-output.txt||h
 done
 echo "5. action fusion: then_run ran inside write and edit; built-in parity unchanged"
 
+# 6. Evidence-Preserving Reducer end to end: a failing make target becomes a verified receipt.
+printf '{"version":1,"evidencePreservingReducer":true,"evidencePreservingReducerProvider":"mock","evidencePreservingReducerModel":"mock-1"}\n' > "$PIG_CODING_AGENT_DIR/sol-pi.json"
+start_endpoint reducer "$WORK/mock-log-epr"
+cd "$HOME/cwd"
+pig --offline --no-session --model mock/mock-1 --mode json -p 'Run the scripted scenario.' > "$WORK/reducer.jsonl" 2> "$WORK/reducer.stderr" \
+  || fail "reducer session exited $? (see $WORK/reducer.stderr)"
+grep -q 'All done\.' "$WORK/reducer.jsonl" || fail "the reducer session did not reach its final answer (see $WORK/reducer.jsonl)"
+stop_endpoint
+EPR="$WORK/mock-log-epr"
+# Request numbers are global across kinds, so pick the agent request after the bash result by order.
+REDUCER_REQ=$(ls "$EPR"/request-*-reducer.json 2>/dev/null | head -1)
+[ -n "$REDUCER_REQ" ] || fail "no reducer request was logged (see $WORK/reducer.stderr)"
+contains "$REDUCER_REQ" '<untrusted_log>' 'is_error=true'
+LAST_AGENT=$(ls "$EPR"/request-*-agent.json | tail -1)
+contains "$LAST_AGENT" 'sol_pi_evidence_receipt_v1' 'status=failure' 'quote=\"ERROR test target failed\"' # the request log is JSON, so the quotes are escaped
+! grep -qF -- 'test_150 ... ok' "$LAST_AGENT" || fail "$LAST_AGENT still carries the full log"
+ARCHIVED=0
+for object in "$WORK"/tmp/sol-pi-*/evidence-preserving-reducer/objects/*/*; do
+  [ -f "$object" ] && grep -qF 'ERROR test target failed' "$object" && grep -qF 'test_150 ... ok' "$object" && ARCHIVED=$((ARCHIVED + 1))
+done
+[ "$ARCHIVED" -eq 1 ] || fail "expected one archived full log, saw $ARCHIVED"
+echo "6. reducer: a make failure became a verified receipt through the scripted model"
+
 echo "verify.sh: ok"

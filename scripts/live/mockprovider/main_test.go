@@ -184,3 +184,67 @@ func TestServeRejectsNonStream(t *testing.T) {
 		t.Fatalf("GET models: %d %v", get.StatusCode, list)
 	}
 }
+
+const reducerPrompt = "command_sha256=aa\nsource_sha256=deadbeef\nsource_bytes=40\nsource_lines=3\nis_error=true\n<untrusted_log>\ntest_1 ... ok\nERROR test target failed\ntest_2 ... ok\n</untrusted_log>"
+
+func TestClassifyReducerRequest(t *testing.T) {
+	r := request{Tools: []any{map[string]any{}}, Messages: []map[string]any{{"role": "user", "content": parts("go")}, {"role": "user", "content": parts(reducerPrompt)}}}
+	if classify(r) != "reducer" {
+		t.Fatal("<untrusted_log> in the last message must classify as reducer")
+	}
+	r.Messages = r.Messages[:1]
+	if classify(r) != "agent" {
+		t.Fatal("no <untrusted_log> with tools must classify as agent")
+	}
+}
+
+func TestReducerReceipt(t *testing.T) {
+	var got map[string]any
+	if err := json.Unmarshal([]byte(reducerReceipt(reducerPrompt)), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"schema": "sol-pi-evidence-receipt/1", "source_sha256": "deadbeef", "status": "failure", "uncertain": false,
+		"evidence": []any{map[string]any{"kind": "failure", "quote": "ERROR test target failed"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("failure receipt = %v", got)
+	}
+	ok := strings.Replace(strings.Replace(reducerPrompt, "is_error=true", "is_error=false", 1), "ERROR test target failed", "all good", 1)
+	json.Unmarshal([]byte(reducerReceipt(ok)), &got)
+	ev := got["evidence"].([]any)[0].(map[string]any)
+	if got["status"] != "success" || ev["kind"] != "summary" || ev["quote"] != "test_1 ... ok" {
+		t.Fatalf("success receipt = %v", got)
+	}
+}
+
+func TestReducerScenarioSteps(t *testing.T) {
+	s := &server{scenario: scenarios["reducer"]}
+	got := s.nextStep("{}")
+	if got.kind != "tool" || got.name != "write" || got.args["path"] != "Makefile" ||
+		got.args["content"] != "check:\n\t@for i in $$(seq 1 300); do echo \"test_$$i ... ok\"; done; echo \"ERROR test target failed\"; exit 1\n" {
+		t.Fatalf("step 1 = %+v", got)
+	}
+	if got := s.nextStep("{}"); got.kind != "tool" || got.name != "bash" || got.args["command"] != "make check" {
+		t.Fatalf("step 2 = %+v", got)
+	}
+	if got := s.nextStep("{}"); got.kind != "text" || got.text != "All done." {
+		t.Fatalf("step 3 = %+v", got)
+	}
+}
+
+func TestReducerRequestDoesNotAdvanceScenario(t *testing.T) {
+	dir := t.TempDir()
+	ts := httptest.NewServer(&server{scenario: scenarios["reducer"], logDir: dir})
+	defer ts.Close()
+	body, _ := json.Marshal(map[string]any{"model": "mock-1", "stream": true, "messages": []any{map[string]any{"role": "user", "content": reducerPrompt}}})
+	_, lines := post(t, ts.URL, string(body))
+	if c := choice(chunk(t, lines[0]))["delta"].(map[string]any)["content"].(string); !strings.Contains(c, `"source_sha256":"deadbeef"`) {
+		t.Fatalf("reducer reply = %q", c)
+	}
+	_, lines = post(t, ts.URL, `{"model":"mock-1","stream":true,"messages":[],"tools":[{}]}`)
+	if fn := choice(chunk(t, lines[0]))["delta"].(map[string]any)["tool_calls"].([]any)[0].(map[string]any)["function"].(map[string]any); fn["name"] != "write" {
+		t.Fatalf("first agent request after a reducer request got %v", fn)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "request-001-reducer.json")); err != nil {
+		t.Fatal(err)
+	}
+}

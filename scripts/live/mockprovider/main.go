@@ -62,10 +62,39 @@ func messageText(m map[string]any) string {
 }
 
 func classify(r request) string {
+	if n := len(r.Messages); n > 0 && strings.Contains(messageText(r.Messages[n-1]), "<untrusted_log>") {
+		return "reducer"
+	}
 	if len(r.Tools) > 0 {
 		return "agent"
 	}
 	return "auxiliary"
+}
+
+// reducerReceipt answers a reducer prompt: it quotes the first ERROR line of the log, else the first line.
+func reducerReceipt(prompt string) string {
+	field := func(name string) string {
+		_, rest, _ := strings.Cut(prompt, "\n"+name+"=")
+		value, _, _ := strings.Cut(rest, "\n")
+		return value
+	}
+	_, log, _ := strings.Cut(prompt, "<untrusted_log>\n")
+	log, _, _ = strings.Cut(log, "\n</untrusted_log>")
+	lines := strings.Split(log, "\n")
+	quote := lines[0]
+	for _, line := range lines {
+		if strings.Contains(line, "ERROR") {
+			quote = line
+			break
+		}
+	}
+	kind, status := "summary", "success"
+	if field("is_error") == "true" {
+		kind, status = "failure", "failure"
+	}
+	receipt, _ := json.Marshal(map[string]any{"schema": "sol-pi-evidence-receipt/1", "source_sha256": field("source_sha256"), "status": status, "uncertain": false,
+		"evidence": []any{map[string]any{"kind": kind, "quote": quote}}})
+	return string(receipt)
 }
 
 func summarize(n int, kind string, body []byte, r request) summary {
@@ -127,9 +156,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	s.log(n, kind, body, r)
 
 	var action step
-	if kind == "agent" {
+	switch kind {
+	case "agent":
 		action = s.nextStep(string(body))
-	} else {
+	case "reducer":
+		action = textReply(reducerReceipt(messageText(r.Messages[len(r.Messages)-1])))
+	default:
 		action = textReply("Scripted session")
 	}
 	s.stream(w, n, r, action)

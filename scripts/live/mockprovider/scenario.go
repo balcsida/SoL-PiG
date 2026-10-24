@@ -46,4 +46,10 @@ var scenarios = map[string][]step{
 		toolCall("edit", map[string]any{"path": "report.txt", "edits": []map[string]any{{"oldText": "hello", "newText": "bye"}}, "then_run": map[string]any{"command": "exit 7"}}),
 		textReply("All done."),
 	},
+	// Reducer: a failing make target prints 300 lines, so the bash result is reduced to a verified receipt.
+	"reducer": {
+		toolCall("write", map[string]any{"path": "Makefile", "content": "check:\n\t@for i in $$(seq 1 300); do echo \"test_$$i ... ok\"; done; echo \"ERROR test target failed\"; exit 1\n"}),
+		toolCall("bash", map[string]any{"command": "make check"}),
+		textReply("All done."),
+	},
 }
