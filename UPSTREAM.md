@@ -5,3 +5,4 @@ PiG reference: https://github.com/MichaelKinsy/PiG at tag `v0.5.3`.
 
 | file | source | commit |
 |---|---|---|
+| `extensions/sol-pig/internal/config/config.go` | SoL-Pi `src/sol-pi/config.ts` | `2195680` |
