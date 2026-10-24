@@ -11,44 +11,6 @@ import (
 	"testing"
 )
 
-func env(m map[string]string) func(string) string {
-	return func(k string) string { return m[k] }
-}
-
-func TestAgentDir(t *testing.T) {
-	const home = "/home/u"
-	cases := []struct {
-		name string
-		env  map[string]string
-		want string
-	}{
-		{"default", map[string]string{}, "/home/u/.pig/agent"},
-		{"pig home", map[string]string{"PIG_HOME": "/p"}, "/p/agent"},
-		{"xdg", map[string]string{"XDG_CONFIG_HOME": "/x"}, "/x/pig/agent"},
-		{"pig home beats xdg", map[string]string{"PIG_HOME": "/p", "XDG_CONFIG_HOME": "/x"}, "/p/agent"},
-		{"explicit agent dir with tilde", map[string]string{"PIG_CODING_AGENT_DIR": "~/a"}, "/home/u/a"},
-		{"shared mode", map[string]string{"PIG_USE_PI_DIRS": "1"}, "/home/u/.pi/agent"},
-		{"shared mode explicit", map[string]string{"PIG_USE_PI_DIRS": "1", "PI_CODING_AGENT_DIR": "/q"}, "/q"},
-		{"shared mode ignores pig var", map[string]string{"PIG_USE_PI_DIRS": "1", "PIG_CODING_AGENT_DIR": "/ignored"}, "/home/u/.pi/agent"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := AgentDir(env(tc.env), home); got != filepath.FromSlash(tc.want) {
-				t.Fatalf("AgentDir = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestProjectConfigDirName(t *testing.T) {
-	if got := ProjectConfigDirName(env(map[string]string{})); got != ".pig" {
-		t.Fatalf("default = %q", got)
-	}
-	if got := ProjectConfigDirName(env(map[string]string{"PIG_USE_PI_DIRS": "1"})); got != ".pi" {
-		t.Fatalf("shared = %q", got)
-	}
-}
-
 func TestRuntimeRootPersistent(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "sés sion dir")
 	got, err := RuntimeRoot(dir, "abc")

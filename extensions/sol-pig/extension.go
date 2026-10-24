@@ -8,14 +8,12 @@
 package solpig
 
 import (
-	"os"
 	"sync"
 
 	sdk "github.com/MichaelKinsy/PiG/extensions/sdk"
 
 	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/config"
 	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/observationpack"
-	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/paths"
 )
 
 // Extension is the factory PiG loads. It registers only session_start; the
@@ -37,10 +35,22 @@ func Extension() *sdk.Extension {
 	return ext
 }
 
+// loadConfig reads sol-pi.json from the directories the host itself resolves:
+// Pi's getAgentDir() and CONFIG_DIR_NAME, as PiG hands them to every extension.
 func loadConfig(ctx sdk.Context) (config.Config, error) {
+	agentDir, err := sdk.AgentDir()
+	if err != nil {
+		return config.Config{}, err
+	}
+	dirName, err := sdk.ConfigDirName()
+	if err == nil && dirName == "" {
+		err = sdk.ErrHostInfoUnavailable
+	}
+	if err != nil {
+		return config.Config{}, err
+	}
 	trusted, _ := ctx.IsProjectTrusted()
-	home, _ := os.UserHomeDir()
-	return config.Load(ctx.Cwd(), paths.ProjectConfigDirName(os.Getenv), paths.AgentDir(os.Getenv, home), trusted)
+	return config.Load(ctx.Cwd(), dirName, agentDir, trusted)
 }
 
 // registerConfigured registers the enabled mechanisms in SoL-Pi's order:

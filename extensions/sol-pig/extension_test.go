@@ -4,6 +4,7 @@
 package solpig
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,12 +19,13 @@ func TestExtensionIdentity(t *testing.T) {
 	}
 }
 
-// agentDir points the extension at a private agent directory holding body as sol-pi.json ("" for none).
+// agentDir points the extension at a private agent directory holding body as sol-pi.json ("" for none),
+// through the host facts PiG passes every extension process (PIG_EXT_HOST_INFO).
 func agentDir(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv("PIG_USE_PI_DIRS", "")
-	t.Setenv("PIG_CODING_AGENT_DIR", dir)
+	info, _ := json.Marshal(map[string]string{"agentDir": dir, "configDirName": ".pig"})
+	t.Setenv("PIG_EXT_HOST_INFO", string(info))
 	if body != "" {
 		if err := os.WriteFile(filepath.Join(dir, "sol-pi.json"), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
