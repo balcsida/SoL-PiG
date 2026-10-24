@@ -8,6 +8,7 @@
 package testhost
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -117,6 +118,7 @@ type Host struct {
 	pending    map[string]chan responseMsg
 	nextID     uint64
 	handles    uint64
+	cancels    map[string]context.CancelFunc // in-flight builtinTool.execute by executeId
 }
 
 // Start runs ext against a fake host and returns once the handshake is done.
@@ -250,6 +252,18 @@ func (h *Host) Emit(event string, data map[string]any) (any, error) {
 		last = result
 	}
 	return last, nil
+}
+
+// StartRun tells the extension a run is active (the SDK's ctx.Signal becomes non-nil).
+func (h *Host) StartRun() { h.runSignal(false) }
+
+// AbortRun aborts the active run: the SDK cancels ctx.Signal.
+func (h *Host) AbortRun() { h.runSignal(true) }
+
+func (h *Host) runSignal(aborted bool) {
+	h.writeEnvelope(map[string]any{"type": "notify", "notify": map[string]any{
+		"method": "run_signal", "args": map[string]any{"run": 1, "active": true, "aborted": aborted},
+	}})
 }
 
 // EmitContext emits a context event and returns the message list the host now
@@ -389,6 +403,15 @@ func (h *Host) handleCall(id string, call *callMsg) {
 		return
 	}
 	args := h.record(call.Method, call.Args)
+	if call.Method == "builtinTool.execute" {
+		// Runs aside so an executeTool.cancel can arrive while the tool is still running.
+		go h.finishCall(id, call, args)
+		return
+	}
+	h.finishCall(id, call, args)
+}
+
+func (h *Host) finishCall(id string, call *callMsg, args map[string]any) {
 	result, err := h.reply(call.Method, call.Args, args)
 	msg := map[string]any{}
 	if err != nil {
@@ -454,6 +477,15 @@ func (h *Host) reply(method string, raw json.RawMessage, args map[string]any) (a
 		return h.builtinDefinition(args)
 	case "builtinTool.execute":
 		return h.builtinExecute(args)
+	case "executeTool.cancel":
+		id, _ := args["executeId"].(string)
+		h.mu.Lock()
+		cancel := h.cancels[id]
+		h.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		return empty, nil
 	case "sessionRead", "sessionGraph.call":
 		switch m, _ := args["method"].(string); m {
 		case "getShellPath":

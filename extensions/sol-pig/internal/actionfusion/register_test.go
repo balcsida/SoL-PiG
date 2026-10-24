@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	sdk "github.com/MichaelKinsy/PiG/extensions/sdk"
 
@@ -99,8 +100,35 @@ func TestRegistersEditAndWriteWithThenRun(t *testing.T) {
 	if got, want := tool(h, "write").Parameters["required"], []any{"path", "content"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("write required = %v", got)
 	}
-	if !strings.HasPrefix(tool(h, "edit").Description, "Edit a single file using exact text replacement.") {
-		t.Fatalf("edit description = %q", tool(h, "edit").Description)
+	for name, props := range map[string][]string{"edit": {"path", "edits"}, "write": {"path", "content"}} {
+		got := tool(h, name).Parameters["properties"].(map[string]any)
+		for _, p := range props {
+			if got[p] == nil {
+				t.Fatalf("%s lost property %q", name, p)
+			}
+		}
+	}
+	// The fake host answers builtinTool.definition, so the SDK's own fetch is the reference.
+	var wantEdit, wantWrite sdk.BuiltinToolDefinition
+	probe := sdk.New("probe")
+	probe.OnSessionStart(func(ctx sdk.Context, _ map[string]any) (any, error) {
+		var err error
+		if wantEdit, err = sdk.CreateEditToolDefinition(ctx.Cwd(), nil); err != nil {
+			return nil, err
+		}
+		wantWrite, err = sdk.CreateWriteToolDefinition(ctx.Cwd(), nil)
+		return nil, err
+	})
+	ph := testhost.Start(t, probe, testhost.Options{Cwd: t.TempDir()})
+	if _, err := ph.Emit("session_start", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]sdk.BuiltinToolDefinition{"edit": wantEdit, "write": wantWrite} {
+		got := tool(h, name)
+		if got.Description != want.Description || got.PromptSnippet != want.PromptSnippet ||
+			!reflect.DeepEqual(got.PromptGuidelines, want.PromptGuidelines) {
+			t.Fatalf("%s differs from built-in:\n got %+v\nwant %+v", name, got, want.ToolDefinition)
+		}
 	}
 }
 
@@ -153,6 +181,9 @@ func TestNoThenRunIsPlain(t *testing.T) {
 			t.Fatalf("bash called: %+v", c)
 		}
 	}
+	if n := h.Calls("ui.notify"); len(n) != 0 {
+		t.Fatalf("notify = %+v", n)
+	}
 }
 
 func TestMutationErrorSkipsCommand(t *testing.T) {
@@ -162,12 +193,12 @@ func TestMutationErrorSkipsCommand(t *testing.T) {
 		"path": "f.txt", "edits": []any{map[string]any{"oldText": "nope", "newText": "x"}},
 		"then_run": map[string]any{"command": "true"},
 	})
-	if !res.IsError && res.Err == nil {
-		t.Fatalf("want an error, got %+v", res)
+	if res.Err != nil || !res.IsError {
+		t.Fatalf("want an IsError result, got %+v", res)
 	}
-	all := fmt.Sprint(res.Content, res.Err)
-	if !strings.Contains(all, "[then_run:skipped] The file mutation did not complete successfully; the command was not run.") {
-		t.Fatalf("result = %s", all)
+	got := texts(t, res.Content)
+	if want := "[then_run:skipped] The file mutation did not complete successfully; the command was not run."; got[len(got)-1] != want {
+		t.Fatalf("content = %q, want last block %q", got, want)
 	}
 	for _, c := range h.BuiltinCalls() {
 		if c.Name == "bash" {
@@ -269,5 +300,35 @@ func TestShellSettingsErrorsAreReported(t *testing.T) {
 	h.Emit("session_start", map[string]any{})
 	if loadErr == nil || loadErr.Error() != "Action Fusion could not load Pi shell settings: bad settings" {
 		t.Fatalf("err = %v", loadErr)
+	}
+}
+
+func TestAbortReachesTheCommand(t *testing.T) {
+	h, _ := start(t, testhost.Options{})
+	h.StartRun()
+	done := make(chan testhost.ToolCallResult, 1)
+	go func() {
+		done <- h.CallTool("write", "toolu_1", map[string]any{"path": "f.txt", "content": "x", "then_run": map[string]any{"command": "sleep 30"}})
+	}()
+	for start := time.Now(); ; time.Sleep(10 * time.Millisecond) {
+		var running bool
+		for _, c := range h.BuiltinCalls() {
+			running = running || c.Name == "bash"
+		}
+		if running {
+			break
+		}
+		if time.Since(start) > 5*time.Second {
+			t.Fatal("then_run never started")
+		}
+	}
+	h.AbortRun()
+	select {
+	case res := <-done:
+		if all := fmt.Sprint(res.Content, res.Err); strings.Contains(all, "[then_run:succeeded]") {
+			t.Fatalf("aborted command reported success: %s", all)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("abort did not stop the then_run command")
 	}
 }

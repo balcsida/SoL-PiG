@@ -105,13 +105,27 @@ func (h *Host) builtinExecute(args map[string]any) (any, error) {
 	cwd, _ := args["cwd"].(string)
 	params, _ := args["params"].(map[string]any)
 	options, _ := args["options"].(map[string]any)
+	executeID, _ := args["executeId"].(string)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.mu.Lock()
+	if h.cancels == nil {
+		h.cancels = map[string]context.CancelFunc{}
+	}
+	h.cancels[executeID] = cancel
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		delete(h.cancels, executeID)
+		h.mu.Unlock()
+	}()
 	switch name {
 	case "write":
 		return localWrite(cwd, params)
 	case "edit":
 		return localEdit(cwd, params)
 	case "bash":
-		return localBash(cwd, params, options)
+		return localBash(ctx, cwd, params, options)
 	}
 	return nil, fmt.Errorf("unhandled built-in tool %q", name)
 }
@@ -176,7 +190,7 @@ func localEdit(cwd string, params map[string]any) (any, error) {
 	return res, nil
 }
 
-func localBash(cwd string, params, options map[string]any) (any, error) {
+func localBash(parent context.Context, cwd string, params, options map[string]any) (any, error) {
 	command, _ := params["command"].(string)
 	shell, _ := options["shellPath"].(string)
 	if shell == "" {
@@ -185,7 +199,7 @@ func localBash(cwd string, params, options map[string]any) (any, error) {
 	if prefix, _ := options["commandPrefix"].(string); prefix != "" {
 		command = prefix + "\n" + command
 	}
-	ctx := context.Background()
+	ctx := parent
 	timeout, hasTimeout := params["timeout"].(float64)
 	if hasTimeout {
 		var cancel context.CancelFunc
@@ -196,6 +210,9 @@ func localBash(cwd string, params, options map[string]any) (any, error) {
 	cmd.Dir = cwd
 	cmd.WaitDelay = 100 * time.Millisecond // a grandchild holding the pipe open must not outlast the timeout
 	out, err := cmd.CombinedOutput()
+	if parent.Err() != nil {
+		return nil, errors.New("Command aborted")
+	}
 	if hasTimeout && ctx.Err() != nil {
 		return nil, fmt.Errorf("Command timed out after %v seconds", timeout)
 	}

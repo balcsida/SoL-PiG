@@ -132,12 +132,14 @@ func (f *fusion) execute(pick func(builtins) sdk.BuiltinToolDefinition) sdk.Tool
 			return nil, err
 		}
 		id := ctx.ToolCallID()
+		// The run's abort signal (nil when no run is active) so Esc stops the mutation and the command.
+		signal := ctx.Signal()
 		result, status, err := Run(Fused{
 			AbsolutePath: abs,
 			ThenRun:      thenRun,
-			Mutate:       func() (sdk.AgentToolResult, error) { return pick(b).ExecuteWith(ctx, id, rest, nil, nil) },
+			Mutate:       func() (sdk.AgentToolResult, error) { return pick(b).ExecuteWith(ctx, id, rest, signal, nil) },
 			RunBash: func(p map[string]any) (sdk.AgentToolResult, error) {
-				return b.bash.ExecuteWith(ctx, id+":then_run", p, nil, nil)
+				return b.bash.ExecuteWith(ctx, id+":then_run", p, signal, nil)
 			},
 		})
 		if err != nil {
