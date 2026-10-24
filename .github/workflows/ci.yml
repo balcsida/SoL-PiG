@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 SoL-PiG contributors
+# SPDX-License-Identifier: MIT
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: extensions/sol-pig/go.mod
+          cache-dependency-path: extensions/sol-pig/go.sum
+      - name: Unit and fake-host tests
+        working-directory: extensions/sol-pig
+        run: go vet ./... && go test ./...
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install PiG
+        run: npm install -g @pi-in-go/pig@0.5.3 && pig --version
+      - name: Live check against PiG's fake provider
+        run: scripts/live/verify.sh "$RUNNER_TEMP/sol-pig-live"
