@@ -46,13 +46,20 @@ func CallReducer(ctx sdk.Context, cfg Config, command string, isError bool, a Ar
 	}
 	options := map[string]any{"cacheRetention": "none", "maxTokens": int(maxTokens), "sessionId": cfg.RunID, "timeoutMs": 90000}
 
-	done := make(chan map[string]any, 1)
-	go func() { done <- registry.Complete(model, request, options) }()
-
 	var aborted <-chan struct{}
 	if signal := ctx.Signal(); signal != nil {
 		aborted = signal.Done()
 	}
+	select { // an already-aborted run must not start a model call
+	case <-aborted:
+		return ProviderResult{}, ErrTimeout
+	case <-ctx.Done():
+		return ProviderResult{}, ErrTimeout
+	default:
+	}
+	done := make(chan map[string]any, 1)
+	go func() { done <- registry.Complete(model, request, options) }()
+
 	timer := time.NewTimer(Timeout)
 	defer timer.Stop()
 	select {

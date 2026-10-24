@@ -39,4 +39,10 @@ func TestUTF16Len(t *testing.T) {
 	if got := UTF16Len("aé😀"); got != 4 {
 		t.Fatalf("UTF16Len = %d, want 4", got)
 	}
+	if got := UTF16Len("a😀"); got != 3 {
+		t.Fatalf("UTF16Len(a😀) = %d, want 3", got)
+	}
+	if got := UTF16Len("a\xffb"); got != 3 {
+		t.Fatalf("UTF16Len(invalid byte) = %d, want 3", got)
+	}
 }

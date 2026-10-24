@@ -11,7 +11,8 @@
 # ObservationPack enabled, measures the idle footprint of one instance, and
 # plays a scripted scenario through a local OpenAI-compatible endpoint
 # (scripts/live/mockprovider) that proves the placeholder and obs_recall, then a scripted Action Fusion scenario
-# (then_run inside write and edit) and a fake-provider parity check of the built-in tools with it off and on.
+# (then_run inside write and edit), a fake-provider parity check of the built-in tools with it off and on,
+# and the reducer scenario (a failing `make check` becomes a verified receipt through the scripted model).
 # Everything runs in a throwaway HOME; no credential or network provider is used.
 set -euo pipefail
 

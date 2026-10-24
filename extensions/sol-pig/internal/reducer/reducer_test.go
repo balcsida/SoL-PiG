@@ -15,6 +15,7 @@ import (
 	sdk "github.com/MichaelKinsy/PiG/extensions/sdk"
 
 	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/actionfusion"
+	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/paths"
 	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/reducer"
 	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/testhost"
 )
@@ -365,7 +366,8 @@ func TestFailsOpen(t *testing.T) {
 			good := receiptReply(request)
 			var receipt map[string]any
 			if err := json.Unmarshal([]byte(good["content"].([]any)[0].(map[string]any)["text"].(string)), &receipt); err != nil {
-				t.Fatal(err)
+				t.Error(err)
+				return good
 			}
 			receipt["evidence"] = []any{map[string]any{"kind": "failure", "quote": "ERROR invented"}}
 			return modelText(mustJSON(receipt))
@@ -438,7 +440,8 @@ func TestFailsOpen(t *testing.T) {
 			good := receiptReply(request)
 			var receipt map[string]any
 			if err := json.Unmarshal([]byte(good["content"].([]any)[0].(map[string]any)["text"].(string)), &receipt); err != nil {
-				t.Fatal(err)
+				t.Error(err)
+				return good
 			}
 			var evidence []any
 			for _, line := range lines[:12] {
@@ -512,5 +515,60 @@ func TestOnlyTempDirLogsAreRead(t *testing.T) {
 	}
 	if p := promptOf(h); !strings.Contains(p, "ERROR inline tail") || strings.Contains(p, "from the log file") {
 		t.Error("a log outside the temp dir must be ignored")
+	}
+}
+
+func TestAlreadyAbortedRunSkipsModelCall(t *testing.T) {
+	h := start(t, testhost.Options{})
+	h.AbortRun()
+	expectUntouched(t, h, bashEvent("make check", diagnosticBody(), true, nil), []string{"candidate", "fallback"}, "model-call-timeout")
+	if n := len(h.ModelRequests()); n != 0 {
+		t.Fatalf("model requests = %d, want 0", n)
+	}
+}
+
+func TestMaxTokensIsClampedToTheModel(t *testing.T) {
+	for name, tc := range map[string]struct {
+		model map[string]any
+		want  float64
+	}{
+		"model limit":  {map[string]any{"id": "faux-1", "provider": "test-faux", "maxTokens": 1000.0}, 1000},
+		"no limit set": {map[string]any{"id": "faux-1", "provider": "test-faux"}, 2048},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := start(t, testhost.Options{Models: map[string]map[string]any{"test-faux/faux-1": tc.model}})
+			if _, err := h.Emit("tool_result", bashEvent("make check", diagnosticBody(), true, nil)); err != nil {
+				t.Fatal(err)
+			}
+			requests := h.ModelRequests()
+			if len(requests) != 1 {
+				t.Fatalf("model requests = %d", len(requests))
+			}
+			if got, _ := requests[0]["maxTokens"].(float64); got != tc.want {
+				t.Fatalf("maxTokens = %v, want %v (request %v)", got, tc.want, requests[0])
+			}
+		})
+	}
+}
+
+func TestArchiveErrorFailsOpen(t *testing.T) {
+	body := diagnosticBody()
+	sessionDir := t.TempDir()
+	h := start(t, testhost.Options{SessionDir: sessionDir, SessionID: sessionID})
+	// A regular file where the archive's shard directory belongs makes every write fail, whoever runs the test.
+	root, err := paths.RuntimeRoot(sessionDir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shard := filepath.Join(root, "evidence-preserving-reducer", "objects", reducer.SHA256Hex(body)[:2])
+	if err := os.MkdirAll(filepath.Dir(shard), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(shard, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	expectUntouched(t, h, bashEvent("make check", body, true, nil), []string{"fallback"}, "archive-error")
+	if len(h.ModelRequests()) != 0 {
+		t.Fatal("no archive, no model request")
 	}
 }

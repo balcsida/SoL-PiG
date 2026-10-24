@@ -230,3 +230,20 @@ func TestInlineExitFailedZeroSpellings(t *testing.T) {
 		}
 	}
 }
+
+func TestNonDiagnosticCommandSkipsLog(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	logPath := filepath.Join(tmp, "pi-bash-big.log")
+	writeFile(t, logPath, []byte("full log"))
+	event := bashEvent("tiny", map[string]any{"details": map[string]any{"fullOutputPath": logPath}})
+	event["input"] = map[string]any{"command": "cat big.log"}
+	if _, ok := ReducibleToolResult(event); ok {
+		t.Fatal("a non-diagnostic command must not be reducible")
+	}
+	fused := fusedEvent("write", "ok")
+	fused["input"] = map[string]any{"then_run": map[string]any{"command": "cat big.log"}}
+	if _, ok := ReducibleToolResult(fused); ok {
+		t.Fatal("a non-diagnostic then_run must not be reducible")
+	}
+}

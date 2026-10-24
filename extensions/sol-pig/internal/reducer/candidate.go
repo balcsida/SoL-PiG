@@ -8,6 +8,7 @@ package reducer
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -43,24 +44,43 @@ func TempDir() string {
 	return dir
 }
 
-// safeTempLogPath ports safePiBashTempPath.
-func safeTempLogPath(path string) bool {
+// safeTempLogPath ports safePiBashTempPath; it returns the Lstat result so the caller can check the opened file is the same one.
+func safeTempLogPath(path string) (os.FileInfo, bool) {
 	if path == "" || !tempLogName.MatchString(filepath.Base(path)) {
-		return false
+		return nil, false
 	}
 	status, err := os.Lstat(path)
 	if err != nil || !status.Mode().IsRegular() {
-		return false
+		return nil, false
 	}
 	candidate, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return false
+		return nil, false
 	}
 	root, err := filepath.EvalSymlinks(TempDir())
 	if err != nil {
-		return false
+		return nil, false
 	}
-	return filepath.Dir(candidate) == root
+	return status, filepath.Dir(candidate) == root
+}
+
+// readTempLog reads path only if the file opened is the regular file that passed the checks, so a swap in between falls back.
+func readTempLog(path string) ([]byte, bool) {
+	checked, ok := safeTempLogPath(path)
+	if !ok {
+		return nil, false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(checked, opened) {
+		return nil, false
+	}
+	data, err := io.ReadAll(f)
+	return data, err == nil
 }
 
 func toValidUTF8(s string) string { return strings.ToValidUTF8(s, "\uFFFD") }
@@ -122,11 +142,11 @@ func exactBodyFromInline(inline string, details any) string {
 			candidate = strings.TrimSpace(match[1])
 		}
 	}
-	if candidate == "" || !safeTempLogPath(candidate) {
+	if candidate == "" {
 		return inline
 	}
-	data, err := os.ReadFile(candidate)
-	if err != nil {
+	data, ok := readTempLog(candidate)
+	if !ok {
 		return inline
 	}
 	return toValidUTF8(string(data))
@@ -152,6 +172,9 @@ func ReducibleToolResult(event map[string]any) (Reducible, bool) {
 		if command == "" {
 			return Reducible{}, false
 		}
+		if !DiagnosticCommand.MatchString(command) { // before any log read: a huge log of a non-diagnostic command is never opened
+			return Reducible{}, false
+		}
 		inline := toValidUTF8(textContent(content))
 		exitFailed := structuredExitFailed(event)
 		if exitFailed == nil {
@@ -171,7 +194,7 @@ func ReducibleToolResult(event map[string]any) (Reducible, bool) {
 	}
 	thenRun, _ := input["then_run"].(map[string]any)
 	command, _ := thenRun["command"].(string)
-	if command == "" {
+	if command == "" || !DiagnosticCommand.MatchString(command) {
 		return Reducible{}, false
 	}
 	for index, item := range content {

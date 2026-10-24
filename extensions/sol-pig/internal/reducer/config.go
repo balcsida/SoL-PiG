@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"time"
-	"unicode/utf16"
 
 	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/config"
 )
@@ -75,5 +74,12 @@ func SHA256Hex(s string) string {
 
 // UTF16Len is JavaScript's String.length.
 func UTF16Len(s string) int {
-	return len(utf16.Encode([]rune(s)))
+	n := 0
+	for _, r := range s { // an invalid byte decodes as U+FFFD: one unit
+		n++
+		if r > 0xFFFF {
+			n++
+		}
+	}
+	return n
 }
