@@ -38,6 +38,8 @@ Context: same port as above.
 
 Filed: https://github.com/MichaelKinsy/PiG/issues/320
 
+**Withdrawn 2026-10-24:** SDK v0.5.3 already provides `sdk.AgentDir()` and `sdk.ConfigDirName()` through `PIG_EXT_HOST_INFO` (`extensions/sdk/host_info.go`). Closed as not planned.
+
 **Title:** Go SDK: no equivalent of `getAgentDir()` / `CONFIG_DIR_NAME`
 
 **Body:**
