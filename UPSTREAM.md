@@ -19,3 +19,5 @@ PiG reference: https://github.com/MichaelKinsy/PiG at tag `v0.5.3`.
 | `extensions/sol-pig/internal/actionfusion/prepare.go` | PiG `internal/codingagent/tools/edit.go` | `v0.5.3` |
 | `extensions/sol-pig/internal/reducer/config.go` | SoL-Pi `src/sol-pi/extensions/evidence-preserving-reducer/config.ts` | `2195680` |
 | `extensions/sol-pig/internal/reducer/candidate.go` | SoL-Pi `src/sol-pi/extensions/evidence-preserving-reducer/candidate.ts` | `2195680` |
+| `extensions/sol-pig/internal/reducer/archive.go` | SoL-Pi `src/sol-pi/extensions/evidence-preserving-reducer/archive.ts` | `2195680` |
+| `extensions/sol-pig/internal/reducer/receipt.go` | SoL-Pi `src/sol-pi/extensions/evidence-preserving-reducer/receipt.ts` | `2195680` |
