@@ -4,6 +4,8 @@ Four gaps in PiG's Go extension SDK that SoL-PiG works around (design §5.11). E
 
 ## 1. File-mutation queue for tool overrides in the Go, Rust and Python SDKs
 
+Filed: https://github.com/MichaelKinsy/PiG/issues/318
+
 **Title:** Go/Rust/Python SDKs: no file-mutation queue for extension tools that override `edit`/`write`
 
 **Body:**
@@ -17,6 +19,8 @@ Ask: either serialize an overriding tool's execution through the host's queue wh
 Context: porting SoL-Pi's Action Fusion (fused `edit`/`write` + `then_run`) to a Go extension.
 
 ## 2. Let a tool override delegate to, or read, the built-in definition it replaces
+
+Filed: https://github.com/MichaelKinsy/PiG/issues/319
 
 **Title:** SDKs: a tool that overrides a built-in cannot delegate to it or read its definition
 
@@ -32,6 +36,8 @@ Context: same port as above.
 
 ## 3. Agent directory and project config directory helpers in the Go SDK
 
+Filed: https://github.com/MichaelKinsy/PiG/issues/320
+
 **Title:** Go SDK: no equivalent of `getAgentDir()` / `CONFIG_DIR_NAME`
 
 **Body:**
@@ -43,6 +49,8 @@ A Go extension that reads its own config file from the agent directory or from `
 Ask: `Context.AgentDir() string` and `Context.ProjectConfigDirName() string` (or a single `Context.Paths()`), with the same answers the host uses, in all three SDKs.
 
 ## 4. Public Go packages for the compaction helpers Pi serves to extensions
+
+Filed: https://github.com/MichaelKinsy/PiG/issues/321
 
 **Title:** Go SDK: `findCutPoint`, `sessionEntryToContextMessages` and `estimateTokens` are not importable
 
