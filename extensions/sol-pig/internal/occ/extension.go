@@ -411,11 +411,11 @@ func (o *online) agentSettled(ctx sdk.Context, _ map[string]any) (any, error) {
 	ctx.CompactWithOptions(sdk.CompactOptions{
 		CustomInstructions: BoundaryCompactionInstructions,
 		OnComplete: func(result map[string]any) {
+			defer finish(compactionOutcome{}) // a panic below must not leave agent_settled waiting
 			summary, _ := result["summary"].(string)
 			if removed := pending.ArchiveTokens - tokenEstimate(summary); removed > 0 {
 				savings.Show(ctx, savings.OnlineContextCompact, savings.FormatCount(float64(removed), "context tokens removed"))
 			}
-			finish(compactionOutcome{})
 		},
 		OnError: func(err error) {
 			o.mu.Lock()
@@ -424,7 +424,13 @@ func (o *online) agentSettled(ctx sdk.Context, _ map[string]any) (any, error) {
 			finish(compactionOutcome{err: err})
 		},
 	})
-	outcome := <-done
+	var outcome compactionOutcome
+	select {
+	case outcome = <-done:
+	case <-ctx.Done():
+		logf("compaction callback", errors.New("context done"))
+		return nil, nil
+	}
 
 	o.mu.Lock()
 	o.compactionInFlight = false
@@ -457,15 +463,16 @@ func (o *online) agentSettled(ctx sdk.Context, _ map[string]any) (any, error) {
 	case failure != nil:
 		reminder = CompactionFailedResumeReminder
 	}
+	var sendErr error
 	if reminder != "" {
-		if err := ctx.SendMessage(reminderCustomType, reminder, false, sdk.SendMessageOptions{TriggerTurn: sdk.Bool(true)}); err != nil {
-			logf("send the resume reminder", err)
+		if sendErr = ctx.SendMessage(reminderCustomType, reminder, false, sdk.SendMessageOptions{TriggerTurn: sdk.Bool(true)}); sendErr != nil {
+			logf("send the resume reminder", sendErr)
 		}
 	}
 	if failure != nil && !recoverable {
 		return nil, failure
 	}
-	return nil, nil
+	return nil, sendErr
 }
 
 // sessionBeforeCompact: the host may run its own threshold compaction for a run this extension already stopped for a selected

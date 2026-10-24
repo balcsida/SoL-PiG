@@ -8,10 +8,39 @@ package occ
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/MichaelKinsy/PiG/extensions/sdk"
+
+	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/savings"
 )
+
+const planBannerSaving = "compacts only when projected savings are positive"
+
+// planCallLines ports renderCall: the banner over "Plan: N steps, M completed".
+func planCallLines(args map[string]any) []string {
+	steps, _ := args["steps"].([]any)
+	completed := 0
+	for _, s := range steps {
+		if m, _ := s.(map[string]any); m["status"] == "completed" {
+			completed++
+		}
+	}
+	return savings.BannerLines(savings.OnlineContextCompact, planBannerSaving, []string{fmt.Sprintf("Plan: %d steps, %d completed", len(steps), completed)})
+}
+
+// planResultLines ports renderResult.
+func planResultLines(isPartial bool, details map[string]any) []string {
+	base := "Plan recorded"
+	switch {
+	case isPartial:
+		base = "Updating plan..."
+	case details["boundary"] == true:
+		base = "Progress boundary recorded"
+	}
+	return savings.BannerLines(savings.OnlineContextCompact, planBannerSaving, []string{base})
+}
 
 func stringArraySchema(maxItems int) map[string]any {
 	return map[string]any{"type": "array", "items": map[string]any{"type": "string", "maxLength": 1000}, "maxItems": maxItems}
@@ -68,6 +97,13 @@ func (o *online) registerTool(ext *sdk.Extension) {
 		RenderShell:   sdk.ToolRenderShellSelf,
 		Parameters:    planParameters(),
 		Execute:       o.updatePlan,
+		RenderCall: func(_ sdk.Context, args map[string]any, _ sdk.ToolRenderContext, _ int) ([]string, error) {
+			return planCallLines(args), nil
+		},
+		RenderResult: func(_ sdk.Context, result sdk.ToolRenderResult, options sdk.ToolRenderResultOptions, _ sdk.ToolRenderContext, _ int) ([]string, error) {
+			details, _ := result.Details.(map[string]any)
+			return planResultLines(options.IsPartial, details), nil
+		},
 	})
 }
 

@@ -7,9 +7,11 @@
 package occ
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -68,7 +70,7 @@ func startRig(t *testing.T, opts Options, host testhost.Options) *rig {
 		t.Fatal(err)
 	}
 	ext.Tool("seed", "seed", sdk.Schema{"type": "object"}, func(ctx sdk.Context, p map[string]any) (any, error) {
-		return "ok", ctx.AppendEntry(StateEntryType, p["state"])
+		return "ok", ctx.AppendEntry("sol-pi-online-context-state-v1", p["state"])
 	})
 	if host.Cwd == "" {
 		host.Cwd = t.TempDir()
@@ -133,7 +135,7 @@ func (r *rig) settle(t *testing.T) error {
 func stateEntries(r *rig) []State {
 	var out []State
 	for _, e := range r.Entries() {
-		if e["customType"] == StateEntryType {
+		if e["customType"] == "sol-pi-online-context-state-v1" {
 			out = append(out, RestoreState([]map[string]any{e}))
 		}
 	}
@@ -159,8 +161,20 @@ func TestRegistersOneToolAndTwelveEventsInOrder(t *testing.T) {
 	if len(tools) != 1 || tools[0].Name != "update_plan" || tools[0].Exposure != "model-only" || tools[0].ExecutionMode != "sequential" || tools[0].RenderShell != "self" {
 		t.Fatalf("tools = %+v", tools)
 	}
-	if tools[0].PromptSnippet != "Keep the working plan current" || len(tools[0].PromptGuidelines) != 4 || !strings.HasPrefix(tools[0].Description, "Replace the complete working plan.") {
+	if tools[0].PromptSnippet != "Keep the working plan current" || tools[0].Description != "Replace the complete working plan. Completing a previously registered unfinished step becomes a safe point where SoL-Pi may compact context if doing so is economical. Newly introduced completed steps are recorded as history." {
 		t.Fatalf("tool texts = %+v", tools[0])
+	}
+	wantGuidelines := []string{
+		"Send the complete plan on every update_plan call.",
+		"Preserve step IDs and register unfinished steps before reporting their completion.",
+		"Keep at most one step in_progress and mark finished steps completed.",
+		"When completing a step, include concise progress evidence when available.",
+	}
+	if !reflect.DeepEqual(tools[0].PromptGuidelines, wantGuidelines) {
+		t.Fatalf("guidelines = %q", tools[0].PromptGuidelines)
+	}
+	if got := normalizeJSON(t, tools[0].Parameters); !reflect.DeepEqual(got, normalizeJSON(t, wantSchema)) {
+		t.Fatalf("parameters = %v", got)
 	}
 	registered := h.RegisteredHandlers()
 	want := []string{"session_start", "session_before_tree", "session_tree", "context", "before_provider_request", "message_end", "input", "turn_end", "agent_settled", "session_before_compact", "session_compact", "session_shutdown"}
@@ -379,7 +393,7 @@ func TestBoundaryFlowCompactsAndResumes(t *testing.T) {
 	if err := r.settle(t); err != nil {
 		t.Fatal(err)
 	}
-	if len(instructions) != 1 || instructions[0] != BoundaryCompactionInstructions {
+	if len(instructions) != 1 || instructions[0] != "Preserve completed work, verification results, important decisions, and remaining work." {
 		t.Fatalf("compact instructions = %v", instructions)
 	}
 	msgs := r.Messages()
@@ -387,7 +401,7 @@ func TestBoundaryFlowCompactsAndResumes(t *testing.T) {
 		t.Fatalf("messages = %+v", msgs)
 	}
 	m := msgs[0].Args
-	if m["customType"] != "sol-pi-online-context-compact" || m["content"] != PostCompactionPlanReminder || m["display"] != false || m["options"].(map[string]any)["triggerTurn"] != true {
+	if m["customType"] != "sol-pi-online-context-compact" || m["content"] != "Online context compaction finished. The parent task is still active. Continue the remaining work from the current plan. Preserve existing step IDs when updating progress." || m["display"] != false || m["options"].(map[string]any)["triggerTurn"] != true {
 		t.Fatalf("message = %+v", m)
 	}
 	// Only the 2,001-token user message is removable: saving 2001-1000, debt (195000-1001)*11.5.
@@ -502,7 +516,7 @@ func TestTooLittleHistoryIsNotCompactable(t *testing.T) {
 	}
 }
 
-func TestProjectionOrSettingsErrorMeansNoCompaction(t *testing.T) {
+func TestProjectionErrorMeansNoCompaction(t *testing.T) {
 	r := startRig(t, Options{CacheWriteReadRatio: ratio(12.5), KeepRecentTokens: keep(1)}, testhost.Options{})
 	r.Handle("sessionRead", func(map[string]any) (any, error) { return nil, errors.New("projection unavailable") })
 	r.boundary(t, boundaryTurn, false)
@@ -559,7 +573,7 @@ func TestRecoverableErrorsSkipAndDoNotRetryUntilRealWork(t *testing.T) {
 			if level := fmt.Sprint(notes[0].Args); !strings.Contains(level, "warning") {
 				t.Fatalf("notice args = %v", level)
 			}
-			if msgs := r.Messages(); len(msgs) != 1 || msgs[0].Args["content"] != SkippedCompactionReminder || msgs[0].Args["options"].(map[string]any)["triggerTurn"] != true {
+			if msgs := r.Messages(); len(msgs) != 1 || msgs[0].Args["content"] != "Online context compaction was skipped. The existing context is still available. Continue the remaining work from the current plan." || msgs[0].Args["options"].(map[string]any)["triggerTurn"] != true {
 				t.Fatalf("messages = %+v", msgs)
 			}
 			if s := lastState(t, r); s.NativeCompactionCount != 0 || s.CacheDebtTokens != 0 {
@@ -611,7 +625,7 @@ func TestOtherFailureResumesAndFails(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "provider exploded") {
 		t.Fatalf("settle error = %v", err)
 	}
-	if msgs := r.Messages(); len(msgs) != 1 || msgs[0].Args["content"] != CompactionFailedResumeReminder {
+	if msgs := r.Messages(); len(msgs) != 1 || msgs[0].Args["content"] != "Online context compaction did not complete. The parent task is still active. Continue the remaining work from the current plan." {
 		t.Fatalf("messages = %+v", msgs)
 	}
 	if s := lastState(t, r); s.NativeCompactionCount != 0 || s.CacheDebtTokens != 0 {
@@ -763,5 +777,125 @@ func TestSessionStartAndTreeMakeNoSessionRead(t *testing.T) {
 	r.EmitContext([]any{oldUser})
 	if len(r.Calls("sessionRead")) == 0 {
 		t.Fatal("the first state-needing event did not restore")
+	}
+}
+
+func normalizeJSON(t *testing.T, v any) any {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func schemaString(max int) map[string]any {
+	return map[string]any{"type": "string", "minLength": 1, "maxLength": max}
+}
+
+func schemaStrings(max int) map[string]any {
+	return map[string]any{"type": "array", "items": map[string]any{"type": "string", "maxLength": 1000}, "maxItems": max}
+}
+
+var wantSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"steps": map[string]any{
+			"type": "array", "minItems": 1, "maxItems": 128,
+			"items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": schemaString(16384), "goal": schemaString(16384),
+					"status": map[string]any{"anyOf": []any{
+						map[string]any{"const": "pending", "type": "string"},
+						map[string]any{"const": "in_progress", "type": "string"},
+						map[string]any{"const": "completed", "type": "string"},
+					}},
+				},
+				"required":             []any{"id", "goal", "status"},
+				"additionalProperties": false,
+			},
+		},
+		"progress": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"files_changed": schemaStrings(128), "verification": schemaStrings(64), "decisions": schemaStrings(64),
+			},
+			"required":             []any{"files_changed", "verification", "decisions"},
+			"additionalProperties": false,
+		},
+	},
+	"required":             []any{"steps"},
+	"additionalProperties": false,
+}
+
+func TestPlanRenderers(t *testing.T) {
+	banner := []string{"⚡ SoL-PiG · Online Context Compact", "Money saved · compacts only when projected savings are positive"}
+	steps := []any{
+		map[string]any{"id": "a", "goal": "g", "status": "completed"},
+		map[string]any{"id": "b", "goal": "g", "status": "in_progress"},
+		map[string]any{"id": "c", "goal": "g", "status": "pending"},
+	}
+	for name, tc := range map[string]struct {
+		got  []string
+		want string
+	}{
+		"call":     {planCallLines(map[string]any{"steps": steps}), "Plan: 3 steps, 1 completed"},
+		"pending":  {planResultLines(true, nil), "Updating plan..."},
+		"boundary": {planResultLines(false, map[string]any{"boundary": true}), "Progress boundary recorded"},
+		"plain":    {planResultLines(false, map[string]any{"boundary": false}), "Plan recorded"},
+	} {
+		if want := append(slices.Clone(banner), tc.want); !slices.Equal(tc.got, want) {
+			t.Errorf("%s = %q, want %q", name, tc.got, want)
+		}
+	}
+}
+
+func TestSettingsErrorMeansNoCompaction(t *testing.T) {
+	ext := sdk.New("probe")
+	if err := Register(ext, Options{CacheWriteReadRatio: ratio(12.5), KeepRecentTokens: keep(1)}); err != nil {
+		t.Fatal(err)
+	}
+	h := testhost.Start(t, ext, testhost.Options{
+		Cwd: t.TempDir(), Mode: "tui", SessionDir: t.TempDir(), SessionID: "s1", // no Settings: GetSettings fails
+		ContextUsage: map[string]any{"tokens": 195000, "contextWindow": 200000},
+		ModelInfo:    map[string]any{"id": "m1", "provider": "p", "contextWindow": 200000},
+		Projection:   projectionOf(oldUser, workAssist),
+	})
+	r := &rig{Host: h, ext: ext}
+	r.boundary(t, boundaryTurn, false)
+	if r.Aborts() != 0 {
+		t.Fatalf("aborts = %d after a settings error", r.Aborts())
+	}
+}
+
+func TestThresholdDuringOwnCompactionIsNotCancelled(t *testing.T) {
+	var during any
+	var r *rig
+	r = startRig(t, Options{CacheWriteReadRatio: ratio(12.5), KeepRecentTokens: keep(1)}, testhost.Options{
+		CompactResult: func(map[string]any) (map[string]any, error) {
+			during, _ = r.Emit("session_before_compact", map[string]any{"reason": "threshold"})
+			return map[string]any{"summary": "S", "firstKeptEntryId": "e1", "tokensBefore": 1}, nil
+		},
+	})
+	r.boundary(t, boundaryTurn, false)
+	if err := r.settle(t); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Calls("compact")) != 1 || during != nil {
+		t.Fatalf("compacts %d, threshold during compaction = %v", len(r.Calls("compact")), during)
+	}
+}
+
+func TestReminderSendFailureIsReturned(t *testing.T) {
+	r := startRig(t, Options{CacheWriteReadRatio: ratio(12.5), KeepRecentTokens: keep(1)}, testhost.Options{})
+	r.Handle("sendMessage", func(map[string]any) (any, error) { return nil, errors.New("send refused") })
+	r.boundary(t, boundaryTurn, false)
+	if err := r.settle(t); err == nil || !strings.Contains(err.Error(), "send refused") {
+		t.Fatalf("settle error = %v", err)
 	}
 }
