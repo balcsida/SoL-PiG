@@ -76,6 +76,13 @@ func tool(h *testhost.Host, name string) testhost.ToolDecl {
 	return testhost.ToolDecl{}
 }
 
+func TestOnlyEditPreparesArguments(t *testing.T) {
+	h, _ := start(t, testhost.Options{})
+	if !tool(h, "edit").PreparesArguments || tool(h, "write").PreparesArguments {
+		t.Fatalf("PreparesArguments: edit=%v write=%v", tool(h, "edit").PreparesArguments, tool(h, "write").PreparesArguments)
+	}
+}
+
 func TestRegistersEditAndWriteWithThenRun(t *testing.T) {
 	h, _ := start(t, testhost.Options{})
 	for name, description := range map[string]string{"edit": editThenRun, "write": writeThenRun} {

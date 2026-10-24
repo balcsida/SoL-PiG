@@ -47,6 +47,7 @@ type ToolDecl struct {
 	Name, Description, PromptSnippet string
 	PromptGuidelines                 []string
 	Parameters                       map[string]any
+	PreparesArguments                bool
 }
 
 // ToolCallResult is a tool call's outcome as the host sees it.
@@ -82,11 +83,12 @@ type errorInfo struct {
 }
 
 type wireTool struct {
-	Name             string         `json:"name"`
-	Description      string         `json:"description"`
-	PromptSnippet    string         `json:"prompt_snippet"`
-	PromptGuidelines []string       `json:"prompt_guidelines"`
-	Parameters       map[string]any `json:"parameters"`
+	Name              string         `json:"name"`
+	Description       string         `json:"description"`
+	PromptSnippet     string         `json:"prompt_snippet"`
+	PromptGuidelines  []string       `json:"prompt_guidelines"`
+	Parameters        map[string]any `json:"parameters"`
+	PreparesArguments bool           `json:"prepares_arguments"`
 }
 
 type wireRegister struct {
@@ -394,7 +396,7 @@ func (h *Host) recordTool(tool wireTool) {
 	}
 	h.tools[tool.Name] = ToolDecl{
 		Name: tool.Name, Description: tool.Description, PromptSnippet: tool.PromptSnippet,
-		PromptGuidelines: tool.PromptGuidelines, Parameters: tool.Parameters,
+		PromptGuidelines: tool.PromptGuidelines, Parameters: tool.Parameters, PreparesArguments: tool.PreparesArguments,
 	}
 }
 

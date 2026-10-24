@@ -144,11 +144,12 @@ parity_run() { # <label> <config> <prompt> <seed-file or empty>
   [ -z "$4" ] || printf 'REPLACE_ME\n' > "$dir/$4"
   ( cd "$dir" && pig --offline --no-session --model test-faux/faux-1 -p "$3" > "$dir.out" 2>&1 ) || fail "parity run $1 exited $? (see $dir.out)"
 }
-for spec in "write|Run: write parity-write-output.txt|parity-write-output.txt|" "edit|Run: edit parity-edit-target.txt|parity-edit-target.txt|parity-edit-target.txt"; do
-  IFS='|' read -r name prompt file seed <<<"$spec"
+for spec in "write|Run: write parity-write-output.txt|parity-write-output.txt||hello from faux\nline two\n" "edit|Run: edit parity-edit-target.txt|parity-edit-target.txt|parity-edit-target.txt|REPLACED\n"; do
+  IFS='|' read -r name prompt file seed expected <<<"$spec"
   parity_run "$name-off" '{"version":1}' "$prompt" "$seed"
   parity_run "$name-on" '{"version":1,"actionFusion":true}' "$prompt" "$seed"
   [ -f "$WORK/parity-$name-off/$file" ] || fail "parity $name: the built-in produced no $file (see $WORK/parity-$name-off.out)"
+  printf "$expected" | cmp -s - "$WORK/parity-$name-off/$file" || fail "parity $name: the built-in's $file is not the scenario's expected content"
   cmp -s "$WORK/parity-$name-off/$file" "$WORK/parity-$name-on/$file" || fail "parity $name: $file differs with Action Fusion on"
 done
 echo "5. action fusion: then_run ran inside write and edit; built-in parity unchanged"

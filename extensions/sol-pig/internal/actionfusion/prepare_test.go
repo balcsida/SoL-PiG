@@ -25,6 +25,10 @@ func TestPrepareEditArguments(t *testing.T) {
 			map[string]any{"path": "f", "edits": []any{one}}},
 		{"valid edits array passes through", map[string]any{"path": "f", "edits": []any{one}, "then_run": thenRun},
 			map[string]any{"path": "f", "edits": []any{one}, "then_run": thenRun}},
+		{"non-JSON edits string with a pair", map[string]any{"path": "f", "edits": "not json", "oldText": "a", "newText": "b"},
+			map[string]any{"path": "f", "edits": []any{one}}},
+		{"single-object edits with a pair", map[string]any{"path": "f", "edits": map[string]any{"oldText": "x", "newText": "y"}, "oldText": "a", "newText": "b"},
+			map[string]any{"path": "f", "edits": []any{map[string]any{"oldText": "x", "newText": "y"}, one}}},
 		{"unusable shapes pass through for schema validation", map[string]any{"path": "f", "edits": "not json", "oldText": 1},
 			map[string]any{"path": "f", "edits": "not json", "oldText": 1}},
 	}
