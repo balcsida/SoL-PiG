@@ -91,7 +91,7 @@ func providerResult(reply map[string]any) ProviderResult {
 		return int(n)
 	}
 	return ProviderResult{
-		OK:           stop != "error" && stop != "aborted",
+		OK:           stop == "stop" || stop == "length",
 		OutputText:   text.String(),
 		Provider:     provider,
 		Model:        model,

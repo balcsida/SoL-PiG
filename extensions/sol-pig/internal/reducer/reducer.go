@@ -114,15 +114,18 @@ func reduce(ctx sdk.Context, cfg Config, event map[string]any) (any, error) {
 		"input": provider.Usage.Input, "output": provider.Usage.Output, "cacheRead": provider.Usage.CacheRead,
 		"cacheWrite": provider.Usage.CacheWrite, "totalTokens": provider.Usage.TotalTokens,
 	}
-	journal.Write("provider_response", map[string]any{
-		"toolCallId": toolCallID, "sourceSha256": a.Hash, "provider": provider.Provider, "model": provider.Model,
-		"stopReason": provider.StopReason, "errorMessage": provider.ErrorMessage, "usage": usage,
-	})
+	response := map[string]any{
+		"toolCallId": toolCallID, "sourceSha256": a.Hash, "provider": provider.Provider, "model": provider.Model, "usage": usage,
+	}
+	failure := map[string]any{"toolCallId": toolCallID, "sourceSha256": a.Hash, "reason": "model-response-error"}
+	for key, value := range map[string]string{"stopReason": provider.StopReason, "errorMessage": provider.ErrorMessage} {
+		if value != "" { // TS leaves these undefined, so they are absent on disk
+			response[key], failure[key] = value, value
+		}
+	}
+	journal.Write("provider_response", response)
 	if !provider.OK {
-		journal.Write("fallback", map[string]any{
-			"toolCallId": toolCallID, "sourceSha256": a.Hash, "reason": "model-response-error",
-			"stopReason": provider.StopReason, "errorMessage": provider.ErrorMessage,
-		})
+		journal.Write("fallback", failure)
 		return nil, nil
 	}
 

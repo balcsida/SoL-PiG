@@ -247,8 +247,11 @@ func TestHappyPathReplacesWithReceipt(t *testing.T) {
 		}
 	}
 	notify := h.Calls("ui.notify")
+	if len(notify) != 1 {
+		t.Fatalf("notify = %+v", notify)
+	}
 	message, _ := notify[0].Args["message"].(string)
-	if len(notify) != 1 || !strings.HasPrefix(message, "⚡ SoL-PiG · Luna Delegating\nMoney saved · ") || !strings.HasSuffix(message, "removed from future prompts") {
+	if !strings.HasPrefix(message, "⚡ SoL-PiG · Luna Delegating\nMoney saved · ") || !strings.HasSuffix(message, "removed from future prompts") {
 		t.Errorf("notify = %+v", notify)
 	}
 }
@@ -361,7 +364,9 @@ func TestFailsOpen(t *testing.T) {
 		h := start(t, testhost.Options{ModelReply: func(request map[string]any) map[string]any {
 			good := receiptReply(request)
 			var receipt map[string]any
-			json.Unmarshal([]byte(good["content"].([]any)[0].(map[string]any)["text"].(string)), &receipt)
+			if err := json.Unmarshal([]byte(good["content"].([]any)[0].(map[string]any)["text"].(string)), &receipt); err != nil {
+				t.Fatal(err)
+			}
 			receipt["evidence"] = []any{map[string]any{"kind": "failure", "quote": "ERROR invented"}}
 			return modelText(mustJSON(receipt))
 		}})
@@ -376,6 +381,27 @@ func TestFailsOpen(t *testing.T) {
 		if last["stopReason"] != "error" || last["errorMessage"] != "boom" {
 			t.Errorf("entry = %v", last)
 		}
+	})
+	for name, mutate := range map[string]func(map[string]any){
+		"tool use stop reason": func(m map[string]any) { m["stopReason"] = "toolUse" },
+		"empty stop reason":    func(m map[string]any) { delete(m, "stopReason") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := start(t, testhost.Options{ModelReply: func(request map[string]any) map[string]any {
+				reply := receiptReply(request)
+				mutate(reply)
+				return reply
+			}})
+			expectUntouched(t, h, failing(true), []string{"candidate", "provider_response", "fallback"}, "model-response-error")
+			if got := lastEntry(t, h)["stopReason"]; (got == "toolUse") != (name == "tool use stop reason") {
+				t.Errorf("stopReason = %v", got)
+			}
+		})
+	}
+	t.Run("model lookup error", func(t *testing.T) {
+		h := start(t, testhost.Options{})
+		h.Handle("getModel", func(map[string]any) (any, error) { return nil, fmt.Errorf("registry down") })
+		expectUntouched(t, h, failing(true), []string{"candidate", "fallback"}, "model-call-exception")
 	})
 	t.Run("model unavailable", func(t *testing.T) {
 		h := start(t, testhost.Options{Models: map[string]map[string]any{"other/model": fauxModel}})
@@ -411,7 +437,9 @@ func TestFailsOpen(t *testing.T) {
 		h := start(t, testhost.Options{ModelReply: func(request map[string]any) map[string]any {
 			good := receiptReply(request)
 			var receipt map[string]any
-			json.Unmarshal([]byte(good["content"].([]any)[0].(map[string]any)["text"].(string)), &receipt)
+			if err := json.Unmarshal([]byte(good["content"].([]any)[0].(map[string]any)["text"].(string)), &receipt); err != nil {
+				t.Fatal(err)
+			}
 			var evidence []any
 			for _, line := range lines[:12] {
 				evidence = append(evidence, map[string]any{"kind": "failure", "quote": line})
