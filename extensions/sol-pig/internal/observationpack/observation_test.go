@@ -219,3 +219,30 @@ func TestReadRecallChunkPaging(t *testing.T) {
 		t.Fatalf("offset at size: %+v %v", last, err)
 	}
 }
+
+func TestReadRecallChunkTrimsToCharacterBoundary(t *testing.T) {
+	// 6,000 three-byte characters and no newline: the 15,872-byte limit falls inside a character.
+	original := strings.Repeat("✓", 6000)
+	path := filepath.Join(t.TempDir(), "obs.txt")
+	os.WriteFile(path, []byte(original), 0o600)
+	chunk, err := ReadRecallChunk(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chunk.Bytes != 15870 || chunk.NextOffset != 15870 || !utf8.ValidString(chunk.Text) || chunk.EOF {
+		t.Fatalf("chunk = bytes %d next %d valid %v eof %v", chunk.Bytes, chunk.NextOffset, utf8.ValidString(chunk.Text), chunk.EOF)
+	}
+	first, _ := ReadRecallChunk(path, 1) // inside the first character
+	second, _ := ReadRecallChunk(path, 1)
+	if first.Text != second.Text || first.NextOffset != second.NextOffset || first.NextOffset <= 1 {
+		t.Fatalf("mid-character reads differ or do not advance: %d %d", first.NextOffset, second.NextOffset)
+	}
+}
+
+func TestCompleteLineExcerptTailExcludesCrossingMultiByteLine(t *testing.T) {
+	first := strings.Repeat("é", 60) + "\n" // 121 bytes
+	second := strings.Repeat("a", 400) + "\n"
+	if got := CompleteLineExcerpt(first+second, 512, true); got != second || !utf8.ValidString(got) {
+		t.Fatalf("tail = %q", got)
+	}
+}
