@@ -8,13 +8,12 @@
 # occ). Zero spend; everything runs in a throwaway HOME.
 #
 # Usage: scripts/live/sol-pi-under-pig.sh [work-directory]
-# Env:   SOL_PI_DIR  a SoL-Pi checkout with node_modules (default: the recon clone;
-#                    if it is absent, NVlabs/SoL-Pi at 2195680 is cloned into the work directory)
+# Env:   SOL_PI_DIR  override: a local SoL-Pi checkout with node_modules. Unset, NVlabs/SoL-Pi at 2195680
+#                    is cloned into the work directory and installed with npm ci.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 WORK="${1:-$ROOT/scripts/live/work/sol-pi-under-pig-$(date +%Y%m%d-%H%M%S)}"
-DEFAULT_SOL_PI_DIR=/var/folders/2c/l4z5zdl52bnbx215ffbnzb3m0000gq/T/sol-pig-recon-l6HeCf/sol-pi
 
 fail() { echo "sol-pi-under-pig: FAIL: $*" >&2; exit 1; }
 command -v pig >/dev/null || fail "pig is not installed"
@@ -31,8 +30,7 @@ echo "PiG $(pig --version) · node $NODE_VERSION · work directory $WORK"
 REAL_GOPATH=$(go env GOPATH); REAL_GOCACHE=$(go env GOCACHE); REAL_GOMODCACHE=$(go env GOMODCACHE)
 mkdir -p "$WORK"/home/{cwd,pig/agent,cache,config,data} "$WORK/tmp"
 
-SOL_PI_DIR="${SOL_PI_DIR:-$DEFAULT_SOL_PI_DIR}"
-if [ ! -d "$SOL_PI_DIR" ]; then
+if [ -z "${SOL_PI_DIR:-}" ]; then
   SOL_PI_DIR="$WORK/sol-pi"
   git clone --quiet https://github.com/NVlabs/SoL-Pi "$SOL_PI_DIR" || fail "cannot clone SoL-Pi"
   git -C "$SOL_PI_DIR" checkout --quiet 2195680 || fail "cannot check out SoL-Pi 2195680"

@@ -616,6 +616,55 @@ func TestUserCancellationSendsNothing(t *testing.T) {
 	}
 }
 
+func TestEarlyAbortIsAUserCancel(t *testing.T) {
+	r := startRig(t, Options{CacheWriteReadRatio: ratio(12.5), KeepRecentTokens: keep(1)}, testhost.Options{
+		CompactResult: func(map[string]any) (map[string]any, error) { return nil, errors.New("This operation was aborted") },
+	})
+	r.boundary(t, boundaryTurn, false)
+	if err := r.settle(t); err != nil {
+		t.Fatalf("early abort returned %v", err)
+	}
+	if len(r.Messages()) != 0 {
+		t.Fatalf("messages = %+v", r.Messages())
+	}
+}
+
+func TestUnrestoredSessionIsNotSaved(t *testing.T) {
+	r := startRig(t, Options{}, testhost.Options{})
+	r.Handle("sessionRead", func(map[string]any) (any, error) { return nil, errors.New("branch unreadable") })
+	r.EmitContext([]any{})
+	r.providerRequest(t)
+	if n := len(stateEntries(r)); n != 0 {
+		t.Fatalf("an unrestored session wrote %d state entries", n)
+	}
+}
+
+func TestUncountedBuildIsDroppedOnSessionChange(t *testing.T) {
+	r := startRig(t, Options{}, testhost.Options{})
+	r.EmitContext([]any{})
+	if _, err := r.Emit("session_start", map[string]any{"type": "session_start"}); err != nil {
+		t.Fatal(err)
+	}
+	r.providerRequest(t)
+	if n := len(stateEntries(r)); n != 0 {
+		t.Fatalf("a build from before the session change was counted: %d entries", n)
+	}
+}
+
+func TestFailedAttemptDebtIsNotChargedToAnotherCompaction(t *testing.T) {
+	r := startRig(t, Options{CacheWriteReadRatio: ratio(12.5), KeepRecentTokens: keep(1)}, testhost.Options{
+		CompactResult: func(map[string]any) (map[string]any, error) { return nil, errors.New("provider exploded") },
+	})
+	r.boundary(t, boundaryTurn, false)
+	_ = r.settle(t)
+	if _, err := r.Emit("session_compact", map[string]any{"fromExtension": false}); err != nil {
+		t.Fatal(err)
+	}
+	if s := lastState(t, r); s.NativeCompactionCount != 1 || s.CacheDebtTokens != 0 || s.CacheDebtRepaymentTokens != 0 {
+		t.Fatalf("a failed attempt's debt was charged: %+v", s)
+	}
+}
+
 func TestOtherFailureResumesAndFails(t *testing.T) {
 	r := startRig(t, Options{CacheWriteReadRatio: ratio(12.5), KeepRecentTokens: keep(1)}, testhost.Options{
 		CompactResult: func(map[string]any) (map[string]any, error) { return nil, errors.New("provider exploded") },
@@ -875,16 +924,23 @@ func TestSettingsErrorMeansNoCompaction(t *testing.T) {
 
 func TestThresholdDuringOwnCompactionIsNotCancelled(t *testing.T) {
 	var during any
+	var duringErr error
 	var r *rig
 	r = startRig(t, Options{CacheWriteReadRatio: ratio(12.5), KeepRecentTokens: keep(1)}, testhost.Options{
 		CompactResult: func(map[string]any) (map[string]any, error) {
-			during, _ = r.Emit("session_before_compact", map[string]any{"reason": "threshold"})
+			during, duringErr = r.Emit("session_before_compact", map[string]any{"reason": "threshold"})
 			return map[string]any{"summary": "S", "firstKeptEntryId": "e1", "tokensBefore": 1}, nil
 		},
 	})
 	r.boundary(t, boundaryTurn, false)
 	if err := r.settle(t); err != nil {
 		t.Fatal(err)
+	}
+	if len(r.Handlers("session_before_compact")) == 0 {
+		t.Fatal("no session_before_compact handler to deliver to")
+	}
+	if duringErr != nil {
+		t.Fatalf("emitting the threshold event failed: %v", duringErr)
 	}
 	if len(r.Calls("compact")) != 1 || during != nil {
 		t.Fatalf("compacts %d, threshold during compaction = %v", len(r.Calls("compact")), during)

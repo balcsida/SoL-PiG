@@ -32,8 +32,10 @@ const (
 
 	reminderCustomType = "sol-pi-online-context-compact"
 	skippedEntryType   = "sol-pi-online-context-compact-skipped"
-	cancelledMessage   = "Compaction cancelled"
 )
+
+// userAborts are the texts of a compaction the user stopped: the host's cancel, and the abort that lands before the summary request starts.
+var userAborts = []string{"Compaction cancelled", "This operation was aborted"}
 
 // recoverableCompactionErrors are rejected by the host before it commits a replacement summary, so the current context is still usable.
 var recoverableCompactionErrors = []string{
@@ -133,7 +135,12 @@ func (o *online) ensureRestored(ctx sdk.Context) {
 	o.restored = true
 }
 
+// save writes nothing before the branch is read: a near-initial state would become the newest valid one and lose the history.
 func (o *online) save(ctx sdk.Context) {
+	if !o.restored {
+		logf("save skipped", errors.New("state not restored"))
+		return
+	}
 	if err := ctx.AppendEntry(StateEntryType, o.state); err != nil {
 		logf("save the state entry", err)
 	}
@@ -376,6 +383,7 @@ func (o *online) agentSettled(ctx sdk.Context, _ map[string]any) (any, error) {
 		logf("read the idle state", err)
 	}
 	if err != nil || !idle {
+		// By design a persistent IsIdle error keeps the selection until a correction, compaction or session change.
 		o.selected = pending
 		o.mu.Unlock()
 		return nil, nil
@@ -436,7 +444,7 @@ func (o *online) agentSettled(ctx sdk.Context, _ map[string]any) (any, error) {
 	o.compactionInFlight = false
 	o.mu.Unlock()
 	var failure error
-	if outcome.err != nil && !strings.Contains(outcome.err.Error(), cancelledMessage) {
+	if outcome.err != nil && !slices.ContainsFunc(userAborts, func(s string) bool { return strings.Contains(outcome.err.Error(), s) }) {
 		failure = outcome.err
 	}
 	recoverable := failure != nil && slices.ContainsFunc(recoverableCompactionErrors, func(s string) bool { return strings.Contains(failure.Error(), s) })
