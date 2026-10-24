@@ -77,7 +77,7 @@ MOCK_LOG="$WORK/mock-log"
 ( cd "$ROOT/scripts/live/mockprovider" && exec go run . -addr 127.0.0.1:0 -log-dir "$MOCK_LOG" -scenario observation-pack ) \
   > "$WORK/mock.stdout" 2> "$WORK/mock.stderr" &
 MOCK_PID=$!
-trap 'kill $MOCK_PID 2>/dev/null' EXIT
+trap 'kill $MOCK_PID 2>/dev/null || true' EXIT
 for _ in $(seq 1 120); do [ -s "$MOCK_LOG/addr" ] && break; sleep 0.5; done
 [ -s "$MOCK_LOG/addr" ] || fail "the scripted endpoint did not start (see $WORK/mock.stderr)"
 ADDR=$(cat "$MOCK_LOG/addr")
