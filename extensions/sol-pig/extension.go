@@ -15,6 +15,7 @@ import (
 	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/actionfusion"
 	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/config"
 	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/observationpack"
+	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/occ"
 	"github.com/balcsida/SoL-PiG/extensions/sol-pig/internal/reducer"
 )
 
@@ -78,6 +79,9 @@ func registerConfigured(ext *sdk.Extension, ctx sdk.Context, cfg config.Config, 
 	}
 	if cfg.EvidencePreservingReducer {
 		reducer.Register(ext, reducer.Options{Provider: cfg.ReducerProvider, Model: cfg.ReducerModel})
+	}
+	if cfg.OnlineContextCompact {
+		return occ.Register(ext, occ.Options{CacheWriteReadRatio: &cfg.CacheWriteReadRatio})
 	}
 	return nil
 }

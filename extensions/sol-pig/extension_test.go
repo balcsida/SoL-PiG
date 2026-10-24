@@ -184,3 +184,29 @@ func TestSessionStartRegistersReducer(t *testing.T) {
 		t.Fatalf("tool_result handlers = %v tools = %v", h.Handlers("tool_result"), toolNames(h))
 	}
 }
+
+func TestSessionStartRegistersOnlineContextCompact(t *testing.T) {
+	agentDir(t, `{"version":1,"onlineContextCompact":true}`)
+	h := testhost.Start(t, Extension(), testhost.Options{Cwd: t.TempDir()})
+	if _, err := h.Emit("session_start", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if names := strings.Join(toolNames(h), ","); names != "update_plan" {
+		t.Fatalf("tools = %v", names)
+	}
+}
+
+func TestAllMechanismsRegisterInOrder(t *testing.T) {
+	agentDir(t, `{"version":1,"actionFusion":true,"observationPack":true,"evidencePreservingReducer":true,"onlineContextCompact":true}`)
+	h := testhost.Start(t, Extension(), testhost.Options{Cwd: t.TempDir()})
+	if _, err := h.Emit("session_start", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if names := strings.Join(toolNames(h), ","); names != "edit,write,obs_recall,update_plan" {
+		t.Fatalf("tools = %v", names)
+	}
+	// ObservationPack's context handler is registered first, OCC's last.
+	if ids := h.Handlers("context"); len(ids) != 2 || ids[0] >= ids[1] {
+		t.Fatalf("context handlers = %v", ids)
+	}
+}

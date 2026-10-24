@@ -28,3 +28,5 @@ PiG reference: https://github.com/MichaelKinsy/PiG at tag `v0.5.3`.
 | `extensions/sol-pig/internal/occ/plan.go` | SoL-Pi `src/sol-pi/extensions/online-context-compact/plan.ts` | `2195680` |
 | `extensions/sol-pig/internal/occ/state.go` | SoL-Pi `src/sol-pi/extensions/online-context-compact/state.ts` | `2195680` |
 | `extensions/sol-pig/internal/occ/projection.go` | SoL-Pi `src/sol-pi/extensions/online-context-compact/projection.ts` | `2195680` |
+| `extensions/sol-pig/internal/occ/tools.go` | SoL-Pi `src/sol-pi/extensions/online-context-compact/tools.ts` | `2195680` |
+| `extensions/sol-pig/internal/occ/extension.go` | SoL-Pi `src/sol-pi/extensions/online-context-compact/extension.ts` | `2195680` |
