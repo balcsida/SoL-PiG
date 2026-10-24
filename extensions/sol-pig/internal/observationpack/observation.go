@@ -65,7 +65,7 @@ func NewObservation(toolName, toolCallID string, textBlocks []string) (Observati
 		return Observation{}, false
 	}
 	contentHash := sha256Hex([]byte(text))
-	id := "obs_" + sha256Hex([]byte(toolName+"\x00"+toolCallID+"\x00"+contentHash))[:24]
+	id := "obs_" + sha256Hex([]byte(toolName + "\x00" + toolCallID + "\x00" + contentHash))[:24]
 	return Observation{
 		ID: id, ToolName: toolName, ToolCallID: toolCallID, Text: text, ContentHash: contentHash,
 		Bytes: len(text), Lines: CountLines(text), Tokens: EstimateTokens(text),

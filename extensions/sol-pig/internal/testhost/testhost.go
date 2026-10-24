@@ -447,7 +447,7 @@ func (h *Host) reply(method string, raw json.RawMessage, args map[string]any) (a
 		handle := fmt.Sprintf("h%d-%v", h.handles, args["kind"])
 		h.mu.Unlock()
 		return map[string]any{"handle": handle}, nil
-	case "sessionGraph.call":
+	case "sessionRead", "sessionGraph.call":
 		switch m, _ := args["method"].(string); m {
 		case "getSessionDir":
 			return h.opts.SessionDir, nil
@@ -456,8 +456,8 @@ func (h *Host) reply(method string, raw json.RawMessage, args map[string]any) (a
 		case "getBranch":
 			return h.Entries(), nil
 		default:
-			h.t.Errorf("unhandled session graph call %s %v", m, args)
-			return nil, fmt.Errorf("unhandled session graph call %s", m)
+			h.t.Errorf("unhandled session manager call %s %v", m, args)
+			return nil, fmt.Errorf("unhandled session manager call %s", m)
 		}
 	}
 	if strings.HasPrefix(method, "request_state") {
