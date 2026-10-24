@@ -14,3 +14,4 @@ PiG reference: https://github.com/MichaelKinsy/PiG at tag `v0.5.3`.
 | `extensions/sol-pig/extension.go` | SoL-Pi `src/sol-pi/index.ts` | `2195680` |
 | `extensions/sol-pig/internal/actionfusion/paths.go` | SoL-Pi `src/sol-pi/extensions/action-fusion/file-queue.ts` | `2195680` |
 | `extensions/sol-pig/internal/actionfusion/queue.go` | SoL-Pi `src/sol-pi/extensions/action-fusion/file-queue.ts` | `2195680` |
+| `extensions/sol-pig/internal/actionfusion/thenrun.go` | SoL-Pi `src/sol-pi/extensions/action-fusion/then-run.ts` | `2195680` |
