@@ -51,9 +51,11 @@ The table lists the identifiers each mechanism depends on, not every call. Each 
 16. **Invalid UTF-8.** Invalid UTF-8 in a log is sanitised with Go's `strings.ToValidUTF8`, which replaces each run of invalid bytes with one U+FFFD, where Node emits one per maximal invalid subpart. Hashes, archive, quotes and readback all use the same sanitised body, so nothing a user sees differs.
 17. **Compaction in the live checks.** `verify.sh` step 7 and `sol-pi-under-pig.sh` turn PiG's native threshold auto-compaction off (`{"compaction":{"enabled":false}}` in the isolated agent directory's `settings.json`) so the OCC boundary is what compacts at a 60000-token window. In normal use both stay on, as with SoL-Pi under Pi: whichever threshold is reached first compacts, and OCC's `session_before_compact` handler cancels a native threshold compaction only while a boundary is selected.
 18. **JSON escaping.** Plan snapshots and plan advice are rendered with Go's JSON encoder with HTML escaping off, so `&`, `<` and `>` appear literally, as with `JSON.stringify`. Go still escapes U+2028 and U+2029 as `\u2028` and `\u2029`, which `JSON.stringify` leaves literal.
+19. **UI gating.** SoL-Pi shows its savings notices only when `context.mode === "tui"`. PiG 0.5.3 never sends the run mode to extensions, so the SDK's `Mode()` reports `"print"` even in the interactive TUI ([PiG #360](https://github.com/MichaelKinsy/PiG/issues/360)); SoL-PiG gates on `HasUI()` instead and stays silent only without a UI or in RPC mode. Under PiG, SoL-Pi's own notices never appear.
 
 ## Upstream issues
 
 - [PiG #318](https://github.com/MichaelKinsy/PiG/issues/318): file-mutation queue (item 4). Informational: the SDK exports the host-shared `WithFileMutationQueue`, and SoL-PiG keeps its own FIFO queue so the `then_run` command is serialised per file as in SoL-Pi.
 - [PiG #322](https://github.com/MichaelKinsy/PiG/issues/322): `PrepareArguments` on `BuiltinToolDefinition` (item 11).
+- [PiG #360](https://github.com/MichaelKinsy/PiG/issues/360): the extension host never sends the run mode (item 19).
 - PiG #319, #320 and #321 were closed: the SDK already provided the surface they asked for.

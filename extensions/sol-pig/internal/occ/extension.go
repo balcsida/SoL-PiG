@@ -455,7 +455,7 @@ func (o *online) agentSettled(ctx sdk.Context, _ map[string]any) (any, error) {
 		if err := ctx.AppendEntry(skippedEntryType, map[string]any{"reason": failure.Error()}); err != nil {
 			logf("record the skipped compaction", err)
 		}
-		if ctx.Mode() == "tui" {
+		if ctx.HasUI() && ctx.Mode() != "rpc" { // same gate as savings.Show: PiG 0.5.3 never sends the run mode
 			ctx.Notify("Online compaction skipped: "+failure.Error(), "warning")
 		}
 	}

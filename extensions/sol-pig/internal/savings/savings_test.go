@@ -89,6 +89,27 @@ func TestShow(t *testing.T) {
 	}
 }
 
+// PiG 0.5.3 never sends the run mode, so the TUI reports the SDK default "print" with hasUI true.
+func TestShowNotifiesWhenHostOmitsMode(t *testing.T) {
+	h := testhost.Start(t, showingExtension(), testhost.Options{Cwd: t.TempDir(), Mode: "print"})
+	if res := h.CallTool("show", "c1", map[string]any{}); res.Err != nil {
+		t.Fatal(res.Err)
+	}
+	if n, s := h.Calls("ui.notify"), h.Calls("ui.setStatus"); len(n) != 1 || len(s) != 1 {
+		t.Fatalf("notify = %+v, setStatus = %+v", n, s)
+	}
+}
+
+func TestShowSilentWithoutUI(t *testing.T) {
+	h := testhost.Start(t, showingExtension(), testhost.Options{Cwd: t.TempDir(), Mode: "print", HasUI: new(bool)})
+	if res := h.CallTool("show", "c1", map[string]any{}); res.Err != nil {
+		t.Fatal(res.Err)
+	}
+	if n, s := h.Calls("ui.notify"), h.Calls("ui.setStatus"); len(n) != 0 || len(s) != 0 {
+		t.Fatalf("notify = %+v, setStatus = %+v", n, s)
+	}
+}
+
 func TestShowSilentOutsideTUI(t *testing.T) {
 	h := testhost.Start(t, showingExtension(), testhost.Options{Cwd: t.TempDir(), Mode: "rpc"})
 	if res := h.CallTool("show", "c1", map[string]any{}); res.Err != nil {

@@ -40,6 +40,7 @@ type Options struct {
 	ModelDelay time.Duration                               // holds the modelStream reply; ends early when the host stops
 
 	Idle          *bool                                             // isIdle answer; nil → true
+	HasUI         *bool                                             // ready state hasUI; nil → true
 	ContextUsage  map[string]any                                    // getContextUsage answer; nil → null
 	SystemPrompt  string                                            // getSystemPrompt answer
 	ModelInfo     map[string]any                                    // getModelInfo answer; nil → null
@@ -176,7 +177,7 @@ func Start(t *testing.T, ext *sdk.Extension, opts Options) *Host {
 		h.recordTool(tool)
 	}
 	state := map[string]any{
-		"activeTools": opts.ActiveTools, "isIdle": false, "projectTrusted": opts.ProjectTrusted, "hasUI": true,
+		"activeTools": opts.ActiveTools, "isIdle": false, "projectTrusted": opts.ProjectTrusted, "hasUI": opts.HasUI == nil || *opts.HasUI,
 	}
 	if opts.Settings != nil {
 		state["settings"] = opts.Settings
