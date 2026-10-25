@@ -8,7 +8,7 @@ SoL-PiG is checked inside a real PiG process with no credentials and no spend. E
 scripts/live/verify.sh [work-directory]
 ```
 
-It needs `pig` and `go` on `PATH`. The first run compiles the extension: a cold `pig install --validate-only` compiled the module in about 3 minutes on a loaded machine, and the build is cached afterwards. The script prints one numbered line per step and `verify.sh: ok` at the end; any failure prints `verify.sh: FAIL: …` and exits non-zero.
+It needs `pig` and `go` on `PATH`. The first run compiles the extension: a cold `pig install --validate-only` compiled the module in about 3 minutes on a loaded machine, and the build is cached afterwards. The script prints one numbered line per step and `verify.sh: ok` at the end; any failure prints `verify.sh: FAIL: …` and exits non-zero. Each scenario enables only the mechanism it checks; the four mechanisms have not been exercised together live.
 
 | Step | What it proves |
 |---|---|
@@ -36,7 +36,7 @@ Run on 2026-10-25.
 |---|---|
 | PiG | `0.5.3+1.4.0.74f46864` |
 | Go | `go1.27.3 darwin/arm64` |
-| Machine | `Darwin arm64` |
+| Machine | `Darwin arm64`, macOS 27.0.1 (kernel 27.0.0) |
 
 `scripts/live/verify.sh`:
 
@@ -52,9 +52,10 @@ PiG 0.5.3+1.4.0.74f46864 · work directory …/scripts/live/work/20261025-020958
 verify.sh: ok
 ```
 
-`scripts/live/sol-pi-under-pig.sh` (Node v26.12.1, `SOL_PI_DIR` pointing at a SoL-Pi checkout at `2195680`):
+`scripts/live/sol-pi-under-pig.sh` (Node v26.12.1, `SOL_PI_DIR` pointing at a SoL-Pi checkout; its commit, `2195680`, was confirmed with `git rev-parse --short HEAD`. The script itself only checks that `src/sol-pi/index.ts` exists; the clone fallback is what pins the commit):
 
 ```text
+PiG 0.5.3+1.4.0.74f46864 · node v26.12.1 · work directory …/scripts/live/work/sol-pi-under-pig-20261025-021336
 sol-pi-under-pig: PiG runs SoL-Pi's compaction sequence
 ```
 
@@ -62,13 +63,13 @@ sol-pi-under-pig: PiG runs SoL-Pi's compaction sequence
 
 Idle memory for 10 instances, from the earlier measurements made while planning the port:
 
-| Setup | 10 idle instances |
-|---|---|
-| Bare PiG | 116 MiB |
-| PiG with a minimal Go extension | 202 MiB |
-| PiG with SoL-Pi under Node | 1,407 MiB |
+| Setup | 10 idle instances | Per instance |
+|---|---|---|
+| Bare PiG | 116 MiB | ≈11.6 MiB |
+| PiG with a minimal Go extension | 202 MiB | ≈20.2 MiB |
+| PiG with SoL-Pi under Node | 1,407 MiB | ≈140.7 MiB |
 
-Step 3 above measures one SoL-PiG instance (PiG plus its extension runner) at 33 MiB on this run. On macOS the script reads `footprint` (physical footprint); elsewhere it falls back to RSS, so numbers from CI are not comparable.
+Step 3 above measures one SoL-PiG instance (PiG plus its extension runner) at 33 MiB on this run. On macOS the script reads `footprint` (physical footprint); elsewhere it falls back to RSS, so numbers from CI are not comparable. The method used for the planning numbers was not recorded, and no 10-instance SoL-PiG run exists, so 330 MiB would be an extrapolation (33 × 10). SoL-PiG's 33 MiB is above the minimal extension's ≈20.2 MiB likely because it counts the extension runner process with the loaded module, where the minimal extension was nearly empty (not verified); it is still under a quarter of SoL-Pi under Node (33 / 140.7 ≈ 0.23).
 
 ## CI
 

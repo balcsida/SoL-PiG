@@ -11,10 +11,10 @@ The packages under `extensions/sol-pig` (`config`, `paths`, `savings`, `actionfu
 
 ## PiG
 
-Copyright Michael Kinsy.
+Copyright Michael Kinsy
 https://github.com/MichaelKinsy/PiG — MIT. Code copied from tag `v0.5.3`: `extensions/sol-pig/internal/actionfusion/prepare.go`, a port of `internal/codingagent/tools/edit.go` (the edit tool's argument normaliser). It is the only file derived from PiG.
 
-PiG is itself derived from Pi (https://github.com/earendil-works/pi, Copyright (c) 2025 Mario Zechner, MIT) and carries Pi's notice; that notice applies to `prepare.go` as well.
+PiG is itself derived from Pi (https://github.com/earendil-works/pi, Copyright (c) 2025 Mario Zechner, MIT) and carries Pi's notice; that notice applies to `prepare.go` as well. The MIT permission notice in LICENSE is the notice under which this PiG- and Pi-derived code is used.
 
 ## PiG extension SDK (dependency)
 
