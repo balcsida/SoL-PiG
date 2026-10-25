@@ -1,0 +1,3 @@
+# Not shipped to npm: tests and the in-process fake PiG host they use.
+*_test.go
+internal/testhost/
