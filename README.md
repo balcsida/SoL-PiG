@@ -26,6 +26,12 @@ Step 3 of `scripts/live/verify.sh` measures one instance on your machine (`footp
 ## Install
 
 ```bash
+pig install npm:sol-pig
+```
+
+Or straight from GitHub:
+
+```bash
 pig install git:github.com/balcsida/SoL-PiG
 ```
 

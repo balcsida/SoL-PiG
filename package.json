@@ -1,1 +1,39 @@
-{"name":"sol-pig","version":"0.1.0","private":true,"pi":{"extensions":["extensions/sol-pig"]}}
+{
+  "name": "sol-pig",
+  "version": "0.1.0",
+  "description": "Go port of NVIDIA's SoL-Pi for PiG: Action Fusion, ObservationPack, Evidence-Preserving Reducer and Online Context Compact without a Node process per instance",
+  "keywords": [
+    "pig-package",
+    "pig",
+    "pi-package",
+    "pi-extension",
+    "sol-pi",
+    "context-management",
+    "token-efficiency"
+  ],
+  "homepage": "https://github.com/balcsida/SoL-PiG#readme",
+  "bugs": {
+    "url": "https://github.com/balcsida/SoL-PiG/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/balcsida/SoL-PiG.git"
+  },
+  "license": "MIT",
+  "files": [
+    "extensions/sol-pig",
+    "docs/compatibility.md",
+    "docs/configuration.md",
+    "docs/verification.md",
+    "SECURITY.md",
+    "THIRD_PARTY_NOTICES.md",
+    "UPSTREAM.md",
+    "CHANGELOG.md",
+    "sol-pi.example.json"
+  ],
+  "pi": {
+    "extensions": [
+      "extensions/sol-pig"
+    ]
+  }
+}
