@@ -230,8 +230,6 @@ def simulate(session, prices):
         pricing[how] += 1
         blocks = session.context_blocks(entry)
         est = [tokens(chars) for _, _, chars, _ in blocks]
-        scale = T / sum(est) if sum(est) > 0 else 1.0
-        sizes = [max(1.0, e * scale) if e else 0.0 for e in est]
         warm = (u.get("cacheRead") or 0) > 0
         counts["requests"] += 1
         counts["cold"] += 0 if warm else 1
@@ -249,21 +247,29 @@ def simulate(session, prices):
             if kind == "assistant":
                 n_after += 1
         assistants_after.reverse()
-        # the actual cut: the first block the recorded cache read did not cover
+        # The session file keeps every result in full, but the recorded prompt already had the recorded
+        # policy's placeholders in it: scale the estimates so that prompt, not the full one, sums to T.
+        replaced_by = lambda policy, j: bool(policy and blocks[j][1] == "toolResult" and blocks[j][3].get("eligible") and blocks[j][3]["bytes"] > policy[0] and assistants_after[j] >= policy[1])
+        est_actual = [tokens(PLACEHOLDER_BYTES) if replaced_by(actual_policy, j) else e for j, e in enumerate(est)]
+        scale = T / sum(est_actual) if sum(est_actual) > 0 else 1.0
+        sizes = [max(1.0, e * scale) if e else 0.0 for e in est]
+        placeholder_size = tokens(PLACEHOLDER_BYTES) * scale
+        # the actual cut: the block edge nearest to the recorded cache read, in the recorded prompt's sizes
         cut_other = None
         if warm:
-            cum = 0.0
-            for j, s in enumerate(sizes):
+            asizes = [placeholder_size if replaced_by(actual_policy, j) else s for j, s in enumerate(sizes)]
+            target = u.get("cacheRead") or 0
+            cum, best, best_gap = 0.0, len(asizes), abs(0 - target)
+            for j, s in enumerate(asizes):
+                if abs(cum - target) < best_gap:
+                    best, best_gap = j, abs(cum - target)
                 cum += s
-                if cum > (u.get("cacheRead") or 0) + 1:
-                    cut_other = j
-                    break
+            if abs(cum - target) < best_gap:
+                best = len(asizes)
+            cut_other = best if best < len(asizes) else None
         for name, policy in policies.items():
-            variant = []
-            for j, (bid, kind, _, meta) in enumerate(blocks):
-                replaced = bool(policy and kind == "toolResult" and meta.get("eligible") and meta["bytes"] > policy[0] and assistants_after[j] >= policy[1])
-                variant.append((bid, replaced))
-            vsizes = [tokens(PLACEHOLDER_BYTES) * scale if r else s for (_, r), s in zip(variant, sizes)]
+            variant = [(bid, replaced_by(policy, j)) for j, (bid, _, _, _) in enumerate(blocks)]
+            vsizes = [placeholder_size if r else s for (_, r), s in zip(variant, sizes)]
             first_change = len(variant)
             previous = prev[name] or []
             for j, v in enumerate(variant):
@@ -274,7 +280,7 @@ def simulate(session, prices):
             # a recorded cache miss that coincides with the recorded policy's own replacement is ObservationPack, not another change
             cut = cut_other
             if cut is not None and name != "actual" and actual_policy and session.arm["op"]:
-                actual_variant = [(bid, bool(kind == "toolResult" and meta.get("eligible") and meta["bytes"] > actual_policy[0] and assistants_after[j] >= actual_policy[1])) for j, (bid, kind, _, meta) in enumerate(blocks)]
+                actual_variant = [(bid, replaced_by(actual_policy, j)) for j, (bid, _, _, _) in enumerate(blocks)]
                 prev_actual = prev["actual"] or []
                 actual_first = next((j for j, v in enumerate(actual_variant) if j >= len(prev_actual) or prev_actual[j] != v), len(actual_variant))
                 if abs(actual_first - cut) <= 1 and any(r for _, r in actual_variant[actual_first:actual_first + 1]):
