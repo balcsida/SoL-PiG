@@ -81,8 +81,13 @@ func TestActionFusionScenarioSteps(t *testing.T) {
 		!reflect.DeepEqual(got.args["then_run"], map[string]any{"command": "exit 7"}) {
 		t.Fatalf("step 2 = %+v", got)
 	}
-	if got := s.nextStep("{}"); got.kind != "text" || got.text != "All done." {
+	got = s.nextStep("{}")
+	if got.kind != "tool" || got.name != "edit" || got.args["path"] != "report.txt" || got.args["oldText"] != "bye" || got.args["newText"] != "ciao" ||
+		got.args["edits"] != nil || !reflect.DeepEqual(got.args["then_run"], map[string]any{"command": "cat report.txt"}) {
 		t.Fatalf("step 3 = %+v", got)
+	}
+	if got := s.nextStep("{}"); got.kind != "text" || got.text != "All done." {
+		t.Fatalf("step 4 = %+v", got)
 	}
 }
 

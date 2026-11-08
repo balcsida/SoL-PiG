@@ -10,6 +10,10 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pig: ['0.5.3', '0.7.0'] # the oldest supported PiG and the latest release; each builds the extension against its own SDK
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -26,6 +30,6 @@ jobs:
         with:
           node-version: 22
       - name: Install PiG
-        run: npm install -g @pi-in-go/pig@0.5.3 && pig --version
+        run: npm install -g "@pi-in-go/pig@${{ matrix.pig }}" && pig --version
       - name: Live check against PiG's fake provider
         run: scripts/live/verify.sh "$RUNNER_TEMP/sol-pig-live"

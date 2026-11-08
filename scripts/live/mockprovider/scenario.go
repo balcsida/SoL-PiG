@@ -50,10 +50,12 @@ var scenarios = map[string][]step{
 		recallObservation,
 		textReply("All done."),
 	},
-	// ActionFusion: write then edit, each with a then_run command; the edit's command fails.
+	// ActionFusion: write then edit, each with a then_run command; the edit's command fails. A last edit in the legacy top-level shape
+	// must be normalised (PiG's own normaliser from PiG 0.7.0, SoL-PiG's port before) and keep its then_run.
 	"action-fusion": {
 		toolCall("write", map[string]any{"path": "report.txt", "content": "hello from the fused write\n", "then_run": map[string]any{"command": "cat report.txt"}}),
 		toolCall("edit", map[string]any{"path": "report.txt", "edits": []map[string]any{{"oldText": "hello", "newText": "bye"}}, "then_run": map[string]any{"command": "exit 7"}}),
+		toolCall("edit", map[string]any{"path": "report.txt", "oldText": "bye", "newText": "ciao", "then_run": map[string]any{"command": "cat report.txt"}}),
 		textReply("All done."),
 	},
 	// Reducer: a failing make target prints 300 lines, so the bash result is reduced to a verified receipt.

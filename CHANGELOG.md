@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+Checked on PiG 0.7.0; PiG 0.5.3 or newer is still supported.
+
+- refactor(action-fusion): on PiG 0.7.0 and newer the `edit` override keeps the SDK's `PrepareArguments`, which runs PiG's own edit normaliser on the host (PiG #322); the port in `internal/actionfusion/prepare.go` is used only on older PiG.
+- test(live): step 5 of `scripts/live/verify.sh` sends a fused `edit` in the legacy top-level `{path, oldText, newText}` shape.
+- ci: the live check runs on PiG 0.5.3 and 0.7.0.
+
 ## 0.1.0 — 2026-10-25
 
 First release, published to npm as `sol-pig`. A port of [SoL-Pi](https://github.com/NVlabs/SoL-Pi) (NVIDIA, MIT) at commit 2195680; model-visible texts are byte-identical to SoL-Pi's, see docs/compatibility.md for the differences.

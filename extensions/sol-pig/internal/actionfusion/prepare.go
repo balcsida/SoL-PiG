@@ -9,6 +9,7 @@ import "encoding/json"
 
 // PrepareEditArguments is the built-in edit's prepareArguments: edits as a JSON string or a single object, and the legacy top-level
 // {oldText, newText}, become edits:[…]. Other members, then_run included, and unusable shapes are left for schema validation.
+// From PiG 0.7.0 the SDK's edit definition runs PiG's own on the host, and Register uses this port only on older PiG.
 func PrepareEditArguments(params map[string]any) (map[string]any, error) {
 	out := make(map[string]any, len(params)+1)
 	for k, v := range params {

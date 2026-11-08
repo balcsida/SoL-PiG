@@ -16,7 +16,7 @@ It needs `pig` and `go` on `PATH`. The first run compiles the extension: a cold 
 | 2 | A session on PiG's fake provider answers, and `obs_recall` and its prompt snippet reach the request. |
 | 3 | Measures the idle footprint of one instance: `pig` plus the extension runner. |
 | 4 | ObservationPack: a large result is sent in full twice, replaced by a placeholder on the third send, and `obs_recall` returns the archived bytes. |
-| 5 | Action Fusion: `then_run` runs inside `write` and `edit`, and the built-in tools produce identical files with the flag off and on. |
+| 5 | Action Fusion: `then_run` runs inside `write` and `edit`, also for an `edit` in the legacy top-level `{path, oldText, newText}` shape, and the built-in tools produce identical files with the flag off and on. |
 | 6 | Reducer: a failing `make` target becomes a verified receipt through the scripted model, with the full log archived. |
 | 7 | OCC: a completed plan step aborts, compacts natively and resumes the task. |
 
@@ -30,29 +30,29 @@ It needs Node ≥ 22.19. It runs SoL-Pi's own compaction sequence (abort, settle
 
 ## Results
 
-Run on 2026-10-25.
+`scripts/live/verify.sh`, run on 2026-11-08 on PiG 0.7.0 and 0.5.3:
 
 | | |
 |---|---|
-| PiG | `0.5.3+1.4.0.74f46864` |
+| PiG | `0.7.0+1.5.0` and `0.5.3+1.4.0.74f46864` |
 | Go | `go1.27.3 darwin/arm64` |
-| Machine | `Darwin arm64`, macOS 27.0.1 (kernel 27.0.0) |
-
-`scripts/live/verify.sh`:
+| Machine | `Darwin arm64`, macOS 27.2 (kernel 27.2.0) |
 
 ```text
-PiG 0.5.3+1.4.0.74f46864 · work directory …/scripts/live/work/20261025-020958
+PiG 0.7.0+1.5.0 · work directory …/scripts/live/work/20261108-152646
 1. validate-only: sol-pig builds and registers
 2. fake-provider session: answered 42; obs_recall and its snippet reached the request
 3. idle footprint: 33 MiB across 2 processes (pig + extension runner)
 4. scripted endpoint: placeholder on the third send, obs_recall returned the bytes
-5. action fusion: then_run ran inside write and edit; built-in parity unchanged
+5. action fusion: then_run ran inside write, edit and a legacy-shape edit; built-in parity unchanged
 6. reducer: a make failure became a verified receipt through the scripted model
 7. occ: a completed plan step triggered native compaction and the task resumed
 verify.sh: ok
 ```
 
-`scripts/live/sol-pi-under-pig.sh` (Node v26.12.1, `SOL_PI_DIR` pointing at a SoL-Pi checkout; its commit, `2195680`, was confirmed with `git rev-parse --short HEAD`. The script itself only checks that `src/sol-pi/index.ts` exists; the clone fallback is what pins the commit):
+On PiG 0.5.3 (work directory `…/scripts/live/work/20261108-152712`) it printed the same seven steps and `verify.sh: ok`, also at 33 MiB. On 0.7.0 the legacy-shape edit is normalised by PiG's own normaliser and on 0.5.3 by SoL-PiG's port. A run on each with the port made to fail on every call showed that: 0.7.0 still passed and the port's error appeared in none of its requests, while 0.5.3 failed at step 5 with the error in its edit results. With the port made a no-op instead, 0.5.3 rejected the legacy edit (`Validation failed for tool …`) and failed step 5.
+
+`scripts/live/sol-pi-under-pig.sh`, last run on 2026-10-25 on PiG `0.5.3+1.4.0.74f46864` with Go `go1.27.3 darwin/arm64` on macOS 27.0.1 (kernel 27.0.0), Node v26.12.1 and `SOL_PI_DIR` pointing at a SoL-Pi checkout (its commit, `2195680`, was confirmed with `git rev-parse --short HEAD`. The script itself only checks that `src/sol-pi/index.ts` exists; the clone fallback is what pins the commit):
 
 ```text
 PiG 0.5.3+1.4.0.74f46864 · node v26.12.1 · work directory …/scripts/live/work/sol-pi-under-pig-20261025-021336
@@ -73,4 +73,4 @@ Step 3 above measures one SoL-PiG instance (PiG plus its extension runner) at 33
 
 ## CI
 
-[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on pushes to `main` and on pull requests. On `ubuntu-latest` it runs `go vet` and `go test` for the extension and for the scripted endpoint, installs PiG 0.5.3 with `npm install -g @pi-in-go/pig@0.5.3`, and runs `scripts/live/verify.sh`. The `sol-pi-under-pig.sh` pre-check is not part of CI.
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on pushes to `main` and on pull requests. On `ubuntu-latest` it runs once for PiG 0.5.3, the oldest supported, and once for 0.7.0: each run does `go vet` and `go test` for the extension and for the scripted endpoint (against the SDK v0.5.3 that `go.mod` requires), installs that PiG with `npm install -g @pi-in-go/pig@<version>`, and runs `scripts/live/verify.sh`, where PiG builds the extension against its own SDK. The `sol-pi-under-pig.sh` pre-check is not part of CI.

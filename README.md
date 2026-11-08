@@ -19,7 +19,7 @@ Step 3 of `scripts/live/verify.sh` measures one instance on your machine (`footp
 
 ## Requirements
 
-- PiG **0.5.3** or newer
+- PiG **0.5.3** or newer (checked on 0.5.3 and 0.7.0)
 - Go **1.26** or newer on `PATH` whenever PiG builds the extension (first load, and any rebuild). The build is cached afterwards; see the first-run note in [docs/verification.md](docs/verification.md).
 - No Node.js or npm is needed to run SoL-PiG. PiG itself may need them, depending on how you install it, and `scripts/live/sol-pi-under-pig.sh` needs Node.
 
@@ -110,7 +110,7 @@ A session without a directory (`--no-session`) gets a private temporary director
 |---|---|
 | [docs/configuration.md](docs/configuration.md) | Sources, schema, defaults, runtime inputs |
 | [docs/compatibility.md](docs/compatibility.md) | PiG APIs used and every difference from SoL-Pi |
-| [docs/verification.md](docs/verification.md) | Live results on PiG 0.5.3 |
+| [docs/verification.md](docs/verification.md) | Live results on PiG 0.5.3 and 0.7.0 |
 | [SECURITY.md](SECURITY.md) | Local storage, remote reduction, `then_run`, reporting |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes |
 | [UPSTREAM.md](UPSTREAM.md) | Which file ports which SoL-Pi or PiG source, at which commit |
@@ -126,7 +126,7 @@ scripts/live/sol-pi-under-pig.sh                          # pre-check: SoL-Pi it
 pig install "$PWD" --validate-only --json                 # does PiG accept the package?
 ```
 
-The live scripts need `pig` and `go` on `PATH`; they write under `scripts/live/work/` (git-ignored) unless you pass a work directory. `.github/workflows/ci.yml` runs the Go checks, the scripted endpoint's tests and `scripts/live/verify.sh` against PiG 0.5.3 on every pull request and push to `main`.
+The live scripts need `pig` and `go` on `PATH`; they write under `scripts/live/work/` (git-ignored) unless you pass a work directory. `.github/workflows/ci.yml` runs the Go checks, the scripted endpoint's tests and `scripts/live/verify.sh` against PiG 0.5.3 and 0.7.0 on every pull request and push to `main`.
 
 ## License
 
