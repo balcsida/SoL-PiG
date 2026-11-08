@@ -167,7 +167,9 @@ func Register(ext *sdk.Extension, ctx sdk.Context, shell ShellOptions) error {
 		return err
 	}
 	edit.Execute = f.execute(func(b builtins) sdk.BuiltinToolDefinition { return b.edit })
-	edit.PrepareArguments = PrepareEditArguments // the SDK's built-in definition does not carry the built-in's own
+	if edit.PrepareArguments == nil { // PiG before 0.7.0: the SDK's built-in definition does not carry the built-in's own (PiG #322)
+		edit.PrepareArguments = PrepareEditArguments
+	}
 	write, err := withThenRun(b.write, writeThenRunDescription)
 	if err != nil {
 		return err
