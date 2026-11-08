@@ -70,10 +70,8 @@ var (
 
 // Show notifies the user and sets the status line in the TUI; other modes stay silent.
 // The status clears after StatusDuration unless a newer saving replaced it.
-// SoL-Pi tests mode === "tui", but PiG 0.5.3 never sends the run mode (Mode() is "print"
-// even in the TUI), so the gate is the host's hasUI, with RPC silent as in SoL-Pi.
 func Show(ctx sdk.Context, m Mechanism, saving string) {
-	if !ctx.HasUI() || ctx.Mode() == "rpc" {
+	if ctx.Mode() != "tui" {
 		return
 	}
 	ctx.Notify("⚡ SoL-PiG · "+string(m)+"\nMoney saved · "+saving, "info")

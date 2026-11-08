@@ -7,6 +7,7 @@ Checked on PiG 0.7.0; PiG 0.5.3 or newer is still supported.
 - refactor(action-fusion): on PiG 0.7.0 and newer the `edit` override keeps the SDK's `PrepareArguments`, which runs PiG's own edit normaliser on the host (PiG #322); the port in `internal/actionfusion/prepare.go` is used only on older PiG.
 - test(live): step 5 of `scripts/live/verify.sh` sends a fused `edit` in the legacy top-level `{path, oldText, newText}` shape.
 - ci: the live check runs on PiG 0.5.3 and 0.7.0.
+- revert(savings): the savings notices and the skipped-compaction warning are gated on the `tui` run mode again, as in SoL-Pi. PiG does send the run mode (PiG #360 misread its code), so nothing changes in PiG's four run modes.
 
 ## 0.1.0 — 2026-10-25
 
