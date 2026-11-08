@@ -11,7 +11,7 @@
 # ObservationPack enabled, measures the idle footprint of one instance, and
 # plays a scripted scenario through a local OpenAI-compatible endpoint
 # (scripts/live/mockprovider) that proves the placeholder and obs_recall, then a scripted Action Fusion scenario
-# (then_run inside write and edit), a fake-provider parity check of the built-in tools with it off and on,
+# (then_run inside write and edit, one edit in the legacy top-level shape), a fake-provider parity check of the built-in tools with it off and on,
 # the reducer scenario (a failing `make check` becomes a verified receipt through the scripted model),
 # and the occ scenario (a completed plan step triggers native compaction and the task resumes).
 # Everything runs in a throwaway HOME; no credential or network provider is used.
@@ -137,7 +137,10 @@ contains() { local file=$1; shift; for needle in "$@"; do grep -qF -- "$needle" 
 contains "$AF/request-001-agent.json" '"then_run"'
 contains "$AF/request-002-agent.json" 'Successfully wrote to report.txt' '[then_run:succeeded]' 'hello from the fused write'
 contains "$AF/request-003-agent.json" 'Successfully replaced 1 block(s) in report.txt.' '[then_run:failed]' 'Command exited with code 7'
-[ "$(cat "$HOME/cwd/report.txt")" = "bye from the fused write" ] || fail "report.txt reads: $(cat "$HOME/cwd/report.txt")"
+# The legacy top-level {path, oldText, newText} edit was normalised and kept its then_run: only its cat prints this line
+# (the request repeats the earlier results, so their texts prove nothing here).
+contains "$AF/request-004-agent.json" 'ciao from the fused write'
+[ "$(cat "$HOME/cwd/report.txt")" = "ciao from the fused write" ] || fail "report.txt reads: $(cat "$HOME/cwd/report.txt")"
 
 # Parity: the fake provider drives the built-in write and edit; the files must not depend on the flag.
 parity_run() { # <label> <config> <prompt> <seed-file or empty>
@@ -155,7 +158,7 @@ for spec in "write|Run: write parity-write-output.txt|parity-write-output.txt||h
   printf "$expected" | cmp -s - "$WORK/parity-$name-off/$file" || fail "parity $name: the built-in's $file is not the scenario's expected content"
   cmp -s "$WORK/parity-$name-off/$file" "$WORK/parity-$name-on/$file" || fail "parity $name: $file differs with Action Fusion on"
 done
-echo "5. action fusion: then_run ran inside write and edit; built-in parity unchanged"
+echo "5. action fusion: then_run ran inside write, edit and a legacy-shape edit; built-in parity unchanged"
 
 # 6. Evidence-Preserving Reducer end to end: a failing make target becomes a verified receipt.
 printf '{"version":1,"evidencePreservingReducer":true,"evidencePreservingReducerProvider":"mock","evidencePreservingReducerModel":"mock-1"}\n' > "$PIG_CODING_AGENT_DIR/sol-pi.json"
